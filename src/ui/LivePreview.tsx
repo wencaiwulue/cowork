@@ -34,7 +34,7 @@ const LivePreview: React.FC<LivePreviewProps> = ({ draft }) => {
         border: '2px solid var(--accent)',
         margin: '0 auto'
       }}>
-        {draft.avatar.startsWith('Pixel') ? '🤖' : '👩‍💻'}
+        {draft.avatar.startsWith('Pixel') ? '🤖' : draft.avatar}
       </div>
 
       <div style={{ textAlign: 'center' }}>
