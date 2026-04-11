@@ -3,6 +3,7 @@ import json
 import uuid
 import time
 import sqlite3
+import traceback
 from abc import ABC, abstractmethod
 from typing import List, Optional, Dict
 from .settings import DATA_DIR, get_settings
@@ -23,8 +24,15 @@ class BaseMemory(ABC):
 
 class Mem0Provider(BaseMemory):
     def __init__(self, config: Dict):
-        from mem0 import Memory
-        self.m = Memory.from_config(config)
+        print(f"DEBUG: Mem0Provider.__init__ called with config keys: {list(config.keys())}")
+        try:
+            from mem0 import Memory
+            self.m = Memory.from_config(config)
+            print(f"DEBUG: Mem0Provider initialized successfully")
+        except Exception as e:
+            print(f"ERROR: Failed to initialize Mem0Provider: {str(e)}")
+            print(f"DEBUG: Full traceback:\n{traceback.format_exc()}")
+            raise
     def add(self, text: str, user_id: str, metadata: Optional[Dict] = None):
         self.m.add(text, user_id=user_id, metadata=metadata)
     def search(self, query: str, user_id: str, limit: int = 5) -> List[Dict]:
@@ -87,19 +95,24 @@ class FileMemoryProvider(BaseMemory):
                         f.write(line)
 
 def get_memory_provider(agent_id: str) -> BaseMemory:
+    print(f"DEBUG: get_memory_provider called for agent {agent_id}")
     settings = get_settings()
     provider_type = settings.get("memory_provider", "mem0")
     llm_config = settings.get("llm", {})
-    
+    print(f"DEBUG: Memory provider type: {provider_type}")
+
     if provider_type == "sqlite":
+        print(f"DEBUG: Returning SQLiteMemoryProvider")
         return SQLiteMemoryProvider()
     if provider_type == "file":
+        print(f"DEBUG: Returning FileMemoryProvider")
         return FileMemoryProvider()
-    
+
     mem0_config = {
         "llm": {"provider": "openai", "config": {"model": llm_config.get("model", "gpt-4o"), "api_key": llm_config.get("api_key"), "base_url": llm_config.get("base_url")}},
         "embedder": {"provider": "openai", "config": {"model": "text-embedding-3-small", "api_key": llm_config.get("api_key"), "base_url": llm_config.get("base_url")}},
         "vector_store": {"provider": "qdrant", "config": {"path": MEM0_DIR}},
         "version": "v1.1"
     }
+    print(f"DEBUG: Returning Mem0Provider with config")
     return Mem0Provider(mem0_config)

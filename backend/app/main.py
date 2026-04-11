@@ -2,6 +2,7 @@ import os
 import json
 import uuid
 import httpx
+import traceback
 from typing import List, Optional, Dict
 from fastapi import FastAPI, HTTPException, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
@@ -245,15 +246,28 @@ async def get_prompt(agent_id: str): return await get_agent_prompt(agent_id)
 
 @app.post("/agents/{agent_id}/run_stream")
 async def run_stream(agent_id: str, request: TaskRequest):
+    print(f"INFO: Starting run_stream for agent {agent_id}")
+    print(f"DEBUG: Request message: {request.message[:100] if request.message else 'None'}")
+    print(f"DEBUG: Request history length: {len(request.history) if request.history else 0}")
+    print(f"DEBUG: Request team_context: {request.team_context}")
     try:
         client, model, messages, mem = await run_agent_task_logic(agent_id, request)
-    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
+        print(f"DEBUG: Successfully initialized LLM client for agent {agent_id}")
+        print(f"DEBUG: Model: {model}, Messages count: {len(messages)}")
+    except Exception as e:
+        print(f"ERROR: Exception in run_agent_task_logic for agent {agent_id}: {str(e)}")
+        print(f"DEBUG: Full traceback:\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
     
     async def stream_generator():
+        print(f"DEBUG: Starting stream generation for agent {agent_id}")
         full_content = ""
         try:
+            print(f"DEBUG: Creating LLM stream with model {model}, {len(messages)} messages")
             stream = await client.chat.completions.create(model=model, messages=messages, stream=True)
+            chunk_count = 0
             async for chunk in stream:
+                chunk_count += 1
                 if chunk.choices:
                     delta = chunk.choices[0].delta
                     content = getattr(delta, "content", None) or ""
@@ -261,11 +275,19 @@ async def run_stream(agent_id: str, request: TaskRequest):
                     if content or reasoning:
                         full_content += content
                         yield f"data: {json.dumps({'content': content, 'reasoning': reasoning})}\n\n"
+            print(f"DEBUG: Stream completed, received {chunk_count} chunks, total content length: {len(full_content)}")
             if full_content.strip():
+                print(f"DEBUG: Storing response in memory for agent {agent_id}")
                 await run_in_threadpool(mem.add, f"User: {request.message}\nAssistant: {full_content}", user_id=agent_id)
             yield "data: [DONE]\n\n"
-        except Exception as e: yield f"data: {json.dumps({'error': str(e)})}\n\n"
-        finally: await client.close()
+        except Exception as e:
+            print(f"ERROR: Exception in stream_generator for agent {agent_id}: {str(e)}")
+            print(f"DEBUG: Full traceback:\n{traceback.format_exc()}")
+            print(f"DEBUG: Partial content accumulated: {full_content[:200] if full_content else 'None'}")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        finally:
+            print(f"DEBUG: Closing LLM client for agent {agent_id}")
+            await client.close()
     return StreamingResponse(stream_generator(), media_type="text/event-stream")
 
 # --- Teams ---

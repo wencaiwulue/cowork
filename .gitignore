@@ -45,3 +45,4 @@ config.prod.yaml
 /list/
 uv.lock
 node_modules
+backend/data
