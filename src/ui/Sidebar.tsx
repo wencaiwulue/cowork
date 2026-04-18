@@ -18,9 +18,11 @@ interface Conversation {
   target_id: string;
 }
 
+type ViewType = 'agents' | 'team' | 'chat' | 'skills' | 'schedules' | 'connectors' | 'channels' | 'pairings' | 'settings' | 'create-team' | 'new-session' | 'langchain';
+
 interface SidebarProps {
-  currentView: string;
-  onViewChange: (view: any) => void;
+  currentView: ViewType;
+  onViewChange: (view: ViewType) => void;
   selectedTeamName?: string;
   onTeamChange: (teamName: string) => void;
 }
@@ -82,16 +84,8 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onViewChange, selectedTe
   };
 
   const handleNewMessage = () => {
-    console.log("Sidebar: handleNewMessage clicked. Agents count:", agents.length);
-    if (agents.length === 0) {
-      alert("Please create at least one Agent first!");
-      onViewChange('agents');
-      return;
-    }
-    const draftId = `new-draft-${Date.now()}`;
-    console.log("Sidebar: Transitioning to chat with draftId:", draftId);
-    onTeamChange(draftId);
-    onViewChange('chat');
+    console.log("Sidebar: handleNewMessage clicked");
+    onViewChange('new-session');
   };
 
   const handleRenameSession = async (id: string) => {
@@ -221,6 +215,9 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onViewChange, selectedTe
             </button>
             <button onClick={() => onViewChange('skills')} style={navItemStyle(currentView === 'skills')}>
               <span style={{ opacity: 0.7 }}>🧩</span> Skills
+            </button>
+            <button onClick={() => onViewChange('langchain')} style={navItemStyle(currentView === 'langchain')}>
+              <span style={{ opacity: 0.7 }}>🦜</span> LangChain
             </button>
           </div>
         )}

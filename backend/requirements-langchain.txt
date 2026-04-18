@@ -1,0 +1,60 @@
+# LangChain 全家桶依赖
+# 安装: pip install -r requirements-langchain.txt
+
+# ========== Core LangChain ==========
+langchain>=0.3.0
+langchain-core>=0.3.0
+langchain-community>=0.3.0
+langchain-text-splitters>=0.3.0
+
+# ========== LLM Providers ==========
+# OpenAI
+langchain-openai>=0.2.0
+openai>=1.40.0
+
+# Ollama (本地模型)
+langchain-ollama>=0.2.0
+
+# ========== Tools ==========
+langchainhub>=0.1.0
+
+# ========== Vector Stores ==========
+# Qdrant
+langchain-qdrant>=0.2.0
+qdrant-client>=1.10.0
+
+# Chroma (可选)
+# chromadb>=0.5.0
+
+# LanceDB (可选)
+# lancedb>=0.12.0
+
+# ========== Document Loaders ==========
+# PDF
+pypdf>=4.0.0
+
+# Word
+python-docx>=1.1.0
+
+# Markdown
+unstructured>=0.14.0
+markdown>=3.6.0
+
+# HTML
+beautifulsoup4>=4.12.0
+
+# ========== Embeddings ==========
+# HuggingFace (可选)
+# sentence-transformers>=2.7.0
+# langchain-huggingface>=0.0.3
+
+# ========== Tracing ==========
+# LangSmith (可选)
+# langsmith>=0.1.0
+
+# Langfuse (可选)
+# langfuse>=2.0.0
+
+# ========== Utilities ==========
+pyyaml>=6.0.1
+python-dotenv>=1.0.0

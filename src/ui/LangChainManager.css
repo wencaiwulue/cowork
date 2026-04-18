@@ -1,0 +1,187 @@
+/* LangChain Manager Styles */
+
+.langchain-manager {
+  padding: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.langchain-header {
+  margin-bottom: 24px;
+}
+
+.langchain-header h2 {
+  margin: 0 0 8px;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.langchain-header p {
+  margin: 0;
+  color: #666;
+  font-size: 14px;
+}
+
+.health-status {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #999;
+}
+
+/* Tabs */
+.langchain-tabs {
+  display: flex;
+  border-bottom: 1px solid #e0e0e0;
+  margin-bottom: 24px;
+}
+
+.langchain-tab {
+  padding: 12px 20px;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  color: #666;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+}
+
+.langchain-tab:hover {
+  color: #007aff;
+}
+
+.langchain-tab.active {
+  color: #007aff;
+  border-bottom-color: #007aff;
+  font-weight: 600;
+}
+
+/* Cards */
+.langchain-card {
+  padding: 16px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background: #fff;
+  transition: box-shadow 0.2s;
+}
+
+.langchain-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.langchain-card.disabled {
+  background: #f5f5f5;
+}
+
+.langchain-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.langchain-card-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.langchain-card-badge {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.langchain-card-badge.enabled {
+  background: #34c759;
+  color: white;
+}
+
+.langchain-card-badge.disabled {
+  background: #ff3b30;
+  color: white;
+}
+
+.langchain-card-description {
+  margin: 0;
+  color: #666;
+  font-size: 14px;
+}
+
+.langchain-card-meta {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #999;
+}
+
+/* Grid */
+.langchain-grid {
+  display: grid;
+  gap: 12px;
+}
+
+/* Error */
+.langchain-error {
+  padding: 12px;
+  background: #ffebee;
+  color: #c62828;
+  borderRadius: 6px;
+  marginBottom: 16px;
+}
+
+/* Loading */
+.langchain-loading {
+  padding: 20px;
+  text-align: center;
+  color: #666;
+}
+
+/* Trace List */
+.langchain-trace-list {
+  display: grid;
+  gap: 8px;
+}
+
+.langchain-trace-item {
+  padding: 12px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background: #fff;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.langchain-trace-info {
+  flex: 1;
+}
+
+.langchain-trace-name {
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.langchain-trace-meta {
+  font-size: 12px;
+  color: #666;
+}
+
+.langchain-trace-status {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-left: 12px;
+}
+
+.langchain-trace-status.completed {
+  background: #34c759;
+}
+
+.langchain-trace-status.error {
+  background: #ff3b30;
+}
+
+.langchain-trace-status.running {
+  background: #007aff;
+}

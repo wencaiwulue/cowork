@@ -11,16 +11,17 @@ import Channels from './Channels';
 import Pairings from './Pairings';
 import MessageView from './MessageView';
 import Settings from './Settings';
+import NewSession from './NewSession';
 import '../index.css';
 
 const App: React.FC = () => {
-  const [view, setView] = useState<'agents' | 'team' | 'chat' | 'skills' | 'schedules' | 'connectors' | 'channels' | 'pairings' | 'settings' | 'create-team'>('chat');
-  const [prevView, setPrevView] = useState<'agents' | 'team' | 'chat' | 'skills' | 'schedules' | 'connectors' | 'channels' | 'pairings' | 'settings' | 'create-team'>('chat');
+  const [view, setView] = useState<'agents' | 'team' | 'chat' | 'skills' | 'schedules' | 'connectors' | 'channels' | 'pairings' | 'settings' | 'create-team' | 'new-session'>('chat');
+  const [prevView, setPrevView] = useState<'agents' | 'team' | 'chat' | 'skills' | 'schedules' | 'connectors' | 'channels' | 'pairings' | 'settings' | 'create-team' | 'new-session'>('chat');
   const [selectedTeamName, setSelectedTeamName] = useState<string>('dev-team');
   const [showFiles, setShowFiles] = useState(false);
 
   const handleViewChange = (newView: typeof view) => {
-    if (newView === 'create-team') {
+    if (newView === 'create-team' || newView === 'new-session') {
       setPrevView(view);
     }
     setView(newView);
@@ -76,11 +77,20 @@ const App: React.FC = () => {
         {view === 'channels' && <div style={{ flex: 1, overflowY: 'auto' }}><Channels /></div>}
         {view === 'pairings' && <div style={{ flex: 1, overflowY: 'auto' }}><Pairings /></div>}
         {view === 'settings' && <div style={{ flex: 1, overflowY: 'auto' }}><Settings /></div>}
+        {view === 'new-session' && (
+          <NewSession
+            onSessionCreated={(sessionId) => {
+              setSelectedTeamName(sessionId);
+              handleViewChange('chat');
+            }}
+            onCancel={() => setView(prevView === 'new-session' ? 'chat' : prevView)}
+          />
+        )}
         {view === 'chat' && (
-          <TeamChat 
-            selectedTeamName={selectedTeamName} 
-            showFiles={showFiles} 
-            onToggleFiles={() => setShowFiles(!showFiles)} 
+          <TeamChat
+            selectedTeamName={selectedTeamName}
+            showFiles={showFiles}
+            onToggleFiles={() => setShowFiles(!showFiles)}
           />
         )}
       </main>
