@@ -23,8 +23,8 @@ for d in [AGENTS_DIR, TEAMS_DIR, SKILLS_DIR, SKILLHUB_DIR, SCHEDULES_DIR, MESSAG
     os.makedirs(d, exist_ok=True)
 
 DEFAULT_SETTINGS = {
-    "skillhub_repo": "https://skillsmp.com", 
-    "memory_provider": "mem0",
+    "skillhub_repo": "https://skillsmp.com",
+    "memory_provider": "sqlite",
     "llm": {
         "base_url": "https://api.openai.com/v1",
         "api_key": "",

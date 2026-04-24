@@ -77,8 +77,15 @@ function _emit(entry: StreamEntry, event: StreamEvent) {
 }
 
 /** 启动一条新的 SSE 长连接。convoId 已有连接则不重复创建。*/
-function _startStream(convoId: string, backendUrl: string, body: object) {
-  if (_registry.has(convoId)) return;
+function _startStream(convoId: string, backendUrl: string, body: object, onComplete?: () => void) {
+  // 如果 entry 已存在（无论 done 状态），先删除旧的再创建新的
+  // 这样可以确保每次启动新流时都是干净的状态
+  const existingEntry = _registry.get(convoId);
+  if (existingEntry) {
+    existingEntry.abort.abort();
+    _registry.delete(convoId);
+    _streamStates.delete(convoId);
+  }
 
   const abort = new AbortController();
   const entry: StreamEntry = { abort, listener: null, buffer: [], done: false };
@@ -156,23 +163,27 @@ function _startStream(convoId: string, backendUrl: string, body: object) {
       if (currentState) {
         _streamStates.set(convoId, { ...currentState, status: 'done' });
       }
-      // 如果 listener 在线，直接通知；否则等 listener 来取时再通知
+      // 如果 listener 在线，直接通知
       if (entry.listener) {
         try { entry.listener({ type: 'stream_done' }); } catch {}
-        _registry.delete(convoId);
-        _streamStates.delete(convoId);
       }
-      // 无 listener 时保留 entry（buffer + done=true），等 registerListener 来消费
+      // 修复：保留 entry（buffer + done=true），让后续切换回该 session 时能正确恢复状态
+      // 不要删除 _registry 和 _streamStates 中的 entry
+
+      // Call completion callback if provided
+      if (onComplete) {
+        try { onComplete(); } catch {}
+      }
     }
   })();
 }
 
-export function startTeamStream(convoId: string, teamName: string, message: string, history: any[], backendUrl: string) {
-  _startStream(convoId, backendUrl, { type: 'team', team_name: teamName, message, history });
+export function startTeamStream(convoId: string, teamName: string, message: string, history: any[], backendUrl: string, onComplete?: () => void) {
+  _startStream(convoId, backendUrl, { type: 'team', team_name: teamName, message, history }, onComplete);
 }
 
-export function startAgentStream(convoId: string, agentId: string, message: string, history: any[], backendUrl: string) {
-  _startStream(convoId, backendUrl, { type: 'agent', agent_id: agentId, message, history });
+export function startAgentStream(convoId: string, agentId: string, message: string, history: any[], backendUrl: string, onComplete?: () => void) {
+  _startStream(convoId, backendUrl, { type: 'agent', agent_id: agentId, message, history }, onComplete);
 }
 
 export function isStreamActive(convoId: string): boolean {
@@ -211,7 +222,8 @@ export function registerListener(convoId: string, listener: StreamListener): () 
 
   if (entry.done) {
     try { listener({ type: 'stream_done' }); } catch {}
-    _registry.delete(convoId);
+    // 不要删除 registry 中的 entry，否则切换回该 session 时无法正确恢复状态
+    // 保留 entry 让后续切换回该 session 时仍能获取到 stream_done 状态
     return () => {};
   }
 
@@ -477,6 +489,446 @@ const ToolExecutionPanel: React.FC<{
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
+// ─── Message Bubble Component ─────────────────────────────────────────────────
+
+interface MessageBubbleProps {
+  msg: AgentMessage;
+  isUser: boolean;
+  content: string;
+  reasoning: string;
+  senderAgent?: Agent;
+  selectedTeam?: Team | null;
+  agents: Agent[];
+  onRetry?: (msg: AgentMessage) => void;
+  onEdit?: (msg: AgentMessage, newContent: string) => void;
+  onDelete?: (msgId: string) => void;
+}
+
+const MessageBubble: React.FC<MessageBubbleProps> = ({
+  msg,
+  isUser,
+  content,
+  reasoning,
+  senderAgent,
+  selectedTeam,
+  agents,
+  onRetry,
+  onEdit,
+  onDelete,
+}) => {
+  const [isHovered, setIsHovered] = useState(false);
+  const [showCopied, setShowCopied] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editContent, setEditContent] = useState(content);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setShowCopied(true);
+      setTimeout(() => setShowCopied(false), 2000);
+    } catch {}
+  };
+
+  const handleRetry = () => {
+    if (onRetry) {
+      onRetry(msg);
+    }
+  };
+
+  const handleEdit = () => {
+    setIsEditing(true);
+    setEditContent(content);
+  };
+
+  const handleSaveEdit = () => {
+    if (onEdit && editContent.trim() !== content) {
+      onEdit(msg, editContent);
+    }
+    setIsEditing(false);
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setEditContent(content);
+  };
+
+  const handleDelete = () => {
+    if (onDelete) {
+      onDelete(msg.id);
+    }
+  };
+
+  const formatTime = (timestamp?: number) => {
+    if (!timestamp) return '';
+    const date = new Date(timestamp * 1000);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  };
+
+  // Extract timestamp from message id
+  const getMessageTime = (): Date | null => {
+    let ts: number | null = null;
+    const streamMatch = msg.id.match(/stream-\w+-(\d+)$/);
+    if (streamMatch) {
+      ts = parseInt(streamMatch[1]);
+    } else if (msg.id.startsWith('u-') || msg.id.startsWith('t-')) {
+      const parts = msg.id.split('-');
+      if (parts[1]) ts = parseInt(parts[1]);
+    } else if (msg.id.startsWith('final-')) {
+      const parts = msg.id.split('-');
+      if (parts[1]) ts = parseInt(parts[1]);
+    }
+    return ts && !isNaN(ts) ? new Date(ts) : null;
+  };
+
+  // Calculate relative time for trace info
+  const getRelativeTime = () => {
+    const msgTime = getMessageTime();
+    if (!msgTime) return '';
+
+    const now = new Date();
+    const diff = now.getTime() - msgTime.getTime();
+    const seconds = Math.floor(diff / 1000);
+    if (seconds < 60) return 'just now';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    return `${hours}h ago`;
+  };
+
+  const msgTime = getMessageTime();
+  const timeStr = msgTime
+    ? msgTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : '';
+  const relativeTime = getRelativeTime();
+
+  return (
+    <div
+      style={{
+        marginBottom: '16px',
+        display: 'flex',
+        gap: '12px',
+        flexDirection: isUser ? 'row-reverse' : 'row',
+        position: 'relative',
+      }}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      {/* Avatar */}
+      <div
+        style={{
+          width: '32px',
+          height: '32px',
+          borderRadius: '8px',
+          background: 'var(--bg-input)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '18px',
+          flexShrink: 0,
+        }}
+      >
+        {isUser ? '👤' : msg.sender_id === 'Team' ? '👥' : senderAgent?.avatar || '🤖'}
+      </div>
+
+      {/* Message Content */}
+      <div
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: isUser ? 'flex-end' : 'flex-start',
+        }}
+      >
+        {/* Sender Name, Time & Trace Info */}
+        <div
+          style={{
+            fontSize: '12px',
+            color: 'var(--text-secondary)',
+            marginBottom: '4px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+          }}
+        >
+          <span>
+            {isUser
+              ? 'You'
+              : msg.sender_id === 'Team'
+              ? selectedTeam?.name
+              : senderAgent?.name || msg.sender_id}
+          </span>
+          {/* Timestamp - always visible */}
+          {timeStr && (
+            <span style={{ fontSize: '11px', opacity: 0.8 }}>
+              {timeStr}
+            </span>
+          )}
+          {/* Trace info - only on hover for AI messages */}
+          {!isUser && isHovered && relativeTime && (
+            <span style={{ fontSize: '11px', fontStyle: 'italic', opacity: 0.7 }}>
+              {relativeTime}
+              {msg.id.startsWith('stream-') && ' • streaming...'}
+            </span>
+          )}
+          {msg.payload?.is_partial && (
+            <span style={{ marginLeft: '6px', opacity: 0.6 }}>●●●</span>
+          )}
+        </div>
+
+        {/* Editing Mode */}
+        {isEditing ? (
+          <div
+            style={{
+              width: '80%',
+              background: 'var(--bg-input)',
+              border: '1px solid var(--accent)',
+              borderRadius: '16px',
+              padding: '12px 16px',
+            }}
+          >
+            <textarea
+              value={editContent}
+              onChange={(e) => setEditContent(e.target.value)}
+              style={{
+                width: '100%',
+                minHeight: '60px',
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--text-primary)',
+                fontSize: '14px',
+                fontFamily: 'inherit',
+                resize: 'vertical',
+                outline: 'none',
+              }}
+              autoFocus
+            />
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: '8px',
+                marginTop: '8px',
+              }}
+            >
+              <button
+                onClick={handleCancelEdit}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border)',
+                  background: 'transparent',
+                  color: 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: 'var(--accent)',
+                  color: '#fff',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                }}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Message Bubble */}
+            <div
+              style={{
+                fontSize: '14px',
+                lineHeight: '1.6',
+                color: isUser ? '#fff' : 'var(--text-primary)',
+                background: isUser ? 'var(--accent)' : 'var(--bg-input)',
+                padding: '12px 16px',
+                borderRadius: '16px',
+                borderTopRightRadius: isUser ? '4px' : '16px',
+                borderTopLeftRadius: isUser ? '16px' : '4px',
+                border: isUser ? 'none' : '1px solid var(--border)',
+                maxWidth: '80%',
+                whiteSpace: 'pre-wrap',
+              }}
+            >
+              {reasoning && (
+                <blockquote
+                  style={{
+                    margin: '0 0 12px 0',
+                    padding: '12px',
+                    borderLeft: '4px solid var(--accent)',
+                    background: 'rgba(0,0,0,0.08)',
+                    fontStyle: 'italic',
+                    fontSize: '13px',
+                    color: isUser ? '#eee' : 'var(--text-secondary)',
+                    borderRadius: '4px',
+                  }}
+                >
+                  {reasoning}
+                </blockquote>
+              )}
+              {content}
+            </div>
+
+            {/* Hover Actions Bar - Below Message */}
+            {isHovered && (
+              <div
+                style={{
+                  display: 'flex',
+                  gap: '4px',
+                  alignItems: 'center',
+                  marginTop: '4px',
+                  padding: '2px 0',
+                }}
+              >
+                {/* Retry Button */}
+                <button
+                  onClick={handleRetry}
+                  title="Retry"
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: '4px',
+                    borderRadius: '4px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--text-secondary)',
+                    transition: 'all 0.2s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'var(--bg-hover)';
+                    e.currentTarget.style.color = 'var(--text-primary)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent';
+                    e.currentTarget.style.color = 'var(--text-secondary)';
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12" />
+                    <path d="M3 3v9h9" />
+                  </svg>
+                </button>
+
+                {/* Edit Button (only for user messages) */}
+                {isUser && (
+                  <button
+                    onClick={handleEdit}
+                    title="Edit"
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: '4px',
+                      borderRadius: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'var(--text-secondary)',
+                      transition: 'all 0.2s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = 'var(--bg-hover)';
+                      e.currentTarget.style.color = 'var(--text-primary)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'transparent';
+                      e.currentTarget.style.color = 'var(--text-secondary)';
+                    }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 20h9" />
+                      <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                    </svg>
+                  </button>
+                )}
+
+                {/* Copy Button */}
+                <button
+                  onClick={handleCopy}
+                  title="Copy"
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: '4px',
+                    borderRadius: '4px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--text-secondary)',
+                    transition: 'all 0.2s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'var(--bg-hover)';
+                    e.currentTarget.style.color = 'var(--text-primary)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent';
+                    e.currentTarget.style.color = 'var(--text-secondary)';
+                  }}
+                >
+                  {showCopied ? (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M20 6 9 17l-5-5" />
+                    </svg>
+                  ) : (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+                      <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+                    </svg>
+                  )}
+                </button>
+
+                {/* Delete Button */}
+                <button
+                  onClick={handleDelete}
+                  title="Delete"
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: '4px',
+                    borderRadius: '4px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--text-secondary)',
+                    transition: 'all 0.2s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(255,69,58,0.1)';
+                    e.currentTarget.style.color = '#ff453a';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent';
+                    e.currentTarget.style.color = 'var(--text-secondary)';
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 6h18" />
+                    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                  </svg>
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const TeamChat: React.FC<TeamChatProps> = ({ selectedTeamName, showFiles, onToggleFiles }) => {
   const [teams, setTeams] = useState<Team[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -630,13 +1082,16 @@ const TeamChat: React.FC<TeamChatProps> = ({ selectedTeamName, showFiles, onTogg
           const convoPartials = partialIdsMapRef.current[convoId] || {};
           const existingId = convoPartials[agentId];
           if (existingId) {
+            // Update existing partial message
             return prev.map(m => m.id !== existingId ? m : {
               ...m, payload: { content: (m.payload.content || '') + content, reasoning: (m.payload.reasoning || '') + reasoning, is_partial: true },
             });
           }
+          // Create new partial message
           const newId = `stream-${agentId}-${Date.now()}`;
           if (!partialIdsMapRef.current[convoId]) partialIdsMapRef.current[convoId] = {};
           partialIdsMapRef.current[convoId][agentId] = newId;
+          // Append new message to the list
           return [...prev, { id: newId, sender_id: agentId, receiver_id: 'User', type: 'FEEDBACK' as const, payload: { content, reasoning, is_partial: true }, context_metadata: { conversation_id: convoId } }];
         });
       } else if (event.type === 'agent_done') {
@@ -691,7 +1146,12 @@ const TeamChat: React.FC<TeamChatProps> = ({ selectedTeamName, showFiles, onTogg
       }
 
       setMessages(prev => {
-        if (prev.find(m => m.id === msg.id)) return prev;
+        // 检查相同 ID
+        if (prev.find(m => m.id === msg.id)) {
+          console.log('[setMessages] duplicate message ignored, id:', msg.id);
+          return prev;
+        }
+        console.log('[setMessages] adding message, id:', msg.id, 'type:', msg.type, 'sender:', msg.sender_id, 'payload:', msg.payload);
         return [...prev, msg];
       });
 
@@ -854,19 +1314,6 @@ const TeamChat: React.FC<TeamChatProps> = ({ selectedTeamName, showFiles, onTogg
           )}
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          {/* Stop button — only when stream is active */}
-          {isOrchestrating && (
-            <button
-              onClick={handleStopStream}
-              style={{
-                padding: '5px 12px', borderRadius: '20px', border: '1px solid #ff453a',
-                background: 'transparent', color: '#ff453a',
-                cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '5px',
-              }}
-            >
-              ■ Stop
-            </button>
-          )}
           {/* Todo button — show when there are todos */}
           {todos.length > 0 && (
             <button
@@ -925,39 +1372,23 @@ const TeamChat: React.FC<TeamChatProps> = ({ selectedTeamName, showFiles, onTogg
 
       {/* Messages */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
+        {console.log('[render] messages count:', messages.length, 'messages:', messages)}
         {messages.filter(msg => msg.type !== 'TASK_STATUS_UPDATE').map(msg => {
           const isUser = msg.sender_id === 'User';
           const { content, reasoning } = formatMessageContent(msg.payload);
           const senderAgent = agents.find(a => a.id === msg.sender_id);
 
           return (
-            <div key={msg.id} style={{ marginBottom: '24px', display: 'flex', gap: '12px', flexDirection: isUser ? 'row-reverse' : 'row' }}>
-              <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'var(--bg-input)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', flexShrink: 0 }}>
-                {isUser ? '👤' : msg.sender_id === 'Team' ? '👥' : senderAgent?.avatar || '🤖'}
-              </div>
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start' }}>
-                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                  {isUser ? 'You' : msg.sender_id === 'Team' ? selectedTeam?.name : senderAgent?.name || msg.sender_id}
-                  {msg.payload?.is_partial && <span style={{ marginLeft: '6px', opacity: 0.6 }}>●●●</span>}
-                </div>
-                <div style={{
-                  fontSize: '14px', lineHeight: '1.6', color: isUser ? '#fff' : 'var(--text-primary)',
-                  background: isUser ? 'var(--accent)' : 'var(--bg-input)',
-                  padding: '12px 16px', borderRadius: '16px',
-                  borderTopRightRadius: isUser ? '4px' : '16px',
-                  borderTopLeftRadius: isUser ? '16px' : '4px',
-                  border: isUser ? 'none' : '1px solid var(--border)',
-                  maxWidth: '80%', whiteSpace: 'pre-wrap',
-                }}>
-                  {reasoning && (
-                    <blockquote style={{ margin: '0 0 12px 0', padding: '12px', borderLeft: '4px solid var(--accent)', background: 'rgba(0,0,0,0.08)', fontStyle: 'italic', fontSize: '13px', color: isUser ? '#eee' : 'var(--text-secondary)', borderRadius: '4px' }}>
-                      {reasoning}
-                    </blockquote>
-                  )}
-                  {content}
-                </div>
-              </div>
-            </div>
+            <MessageBubble
+              key={msg.id}
+              msg={msg}
+              isUser={isUser}
+              content={content}
+              reasoning={reasoning}
+              senderAgent={senderAgent}
+              selectedTeam={selectedTeam}
+              agents={agents}
+            />
           );
         })}
 
@@ -997,12 +1428,25 @@ const TeamChat: React.FC<TeamChatProps> = ({ selectedTeamName, showFiles, onTogg
             disabled={isOrchestrating}
             style={{ width: '100%', background: 'transparent', border: 'none', color: 'var(--text-primary)', outline: 'none', resize: 'none', minHeight: '60px', fontFamily: 'inherit', fontSize: '14px' }}
           />
-          <div style={{ textAlign: 'right' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <button
-              onClick={sendMessage}
-              disabled={isOrchestrating}
-              style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '16px' }}
-            >↑</button>
+              onClick={isOrchestrating ? handleStopStream : sendMessage}
+              style={{
+                width: '32px',
+                height: '32px',
+                borderRadius: '50%',
+                background: isOrchestrating ? '#ff453a' : 'var(--accent)',
+                color: '#fff',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: '16px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+            >
+              {isOrchestrating ? '■' : '↑'}
+            </button>
           </div>
         </div>
       </div>

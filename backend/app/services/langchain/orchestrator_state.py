@@ -107,6 +107,14 @@ class LangChainOrchestrator:
         """初始化编排器"""
         pass
 
+    async def shutdown(self):
+        """关闭编排器，清理资源"""
+        # 清理工作流
+        self._workflows.clear()
+        # 清理活跃上下文
+        self._active_contexts.clear()
+        pass
+
     def _create_agent_runner(self, agent_id: str) -> Callable:
         """创建 Agent 运行器"""
         from ..agent_runner import run_agent_task, stream_agent_task

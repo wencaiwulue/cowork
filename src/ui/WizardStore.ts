@@ -35,7 +35,7 @@ export class WizardStore extends EventEmitter {
     name: '',
     description: '',
     vibe: 'Professional',
-    avatar: 'PixelArt-1',
+    avatar: '🤖',
     tools: [],
     skills: [],
     llm: {
@@ -103,7 +103,7 @@ export class WizardStore extends EventEmitter {
       name: '',
       description: '',
       vibe: 'Professional',
-      avatar: 'PixelArt-1',
+      avatar: '🤖',
       tools: [],
       skills: [],
       llm: {

@@ -1,22 +1,29 @@
+"""
+Memory module using SQLite for persistent conversation memory.
+
+This module provides conversation persistence using plain SQLite,
+compatible with LangGraph's checkpoint format.
+"""
+
 import os
 import json
 import uuid
-import time
 import sqlite3
-import traceback
 from abc import ABC, abstractmethod
-from typing import List, Optional, Dict, Tuple
+from typing import List, Optional, Dict, Tuple, Any
+from contextlib import contextmanager
+from datetime import datetime
+
 from .settings import DATA_DIR, AGENTS_DIR, get_settings
 
+
+# Database paths
 MEM0_DIR = os.path.join(DATA_DIR, "mem0_db")
 SQLITE_DB = os.path.join(DATA_DIR, "memory.db")
 FILE_MEM_DIR = os.path.join(DATA_DIR, "file_memory")
+CONVERSATION_DB = os.path.join(DATA_DIR, "conversations.db")
 
-# Claude Code: MAX_ENTRYPOINT_LINES = 200, MAX_ENTRYPOINT_BYTES = 25_000
-_MEMORY_MD_MAX_LINES = 200
-_MEMORY_MD_MAX_BYTES = 25_000
-
-# Context window sizes per model (approx tokens). Used by maybe_compact_messages.
+# Context window sizes per model (approx tokens)
 CONTEXT_LIMITS: Dict[str, int] = {
     "gpt-4o": 128_000,
     "gpt-4o-mini": 128_000,
@@ -35,9 +42,329 @@ CONTEXT_LIMITS: Dict[str, int] = {
 }
 
 _COMPACTION_THRESHOLD = 0.75
-# Verbatim turns kept after compaction (mirrors Claude Code's approach)
 _KEEP_RECENT_TURNS = 6
 
+
+# =============================================================================
+# SQLite Conversation Memory
+# =============================================================================
+
+class ConversationMemory:
+    """
+    Manages conversation threads using plain SQLite.
+    Stores conversation history in a simple, queryable format.
+    """
+
+    def __init__(self, db_path: str = None):
+        self.db_path = db_path or CONVERSATION_DB
+        self._ensure_db_dir()
+        self._init_db()
+
+    def _ensure_db_dir(self):
+        """Ensure the database directory exists."""
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+
+    def _init_db(self):
+        """Initialize the database schema."""
+        conn = sqlite3.connect(self.db_path)
+        try:
+            # Create threads table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS threads (
+                    thread_id TEXT PRIMARY KEY,
+                    agent_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+
+            # Create messages table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS messages (
+                    message_id TEXT PRIMARY KEY,
+                    thread_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    agent_id TEXT,
+                    created_at TEXT NOT NULL,
+                    metadata TEXT,
+                    FOREIGN KEY (thread_id) REFERENCES threads(thread_id) ON DELETE CASCADE
+                )
+            """)
+
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_messages_thread_id
+                ON messages(thread_id)
+            """)
+
+            conn.commit()
+        finally:
+            conn.close()
+
+    def create_thread(self, agent_id: str) -> str:
+        """
+        Create a new conversation thread for an agent.
+
+        Args:
+            agent_id: The agent identifier
+
+        Returns:
+            The thread ID (UUID string)
+        """
+        thread_id = str(uuid.uuid4())
+        now = datetime.utcnow().isoformat()
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                """
+                INSERT INTO threads (thread_id, agent_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (thread_id, agent_id, now, now)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        return thread_id
+
+    def add_message(
+        self,
+        thread_id: str,
+        content: str,
+        role: str = "user",
+        agent_id: Optional[str] = None,
+        agent_name: Optional[str] = None,
+        metadata: Optional[Dict] = None,
+    ) -> Dict:
+        """
+        Add a message to a conversation thread.
+
+        Args:
+            thread_id: The conversation thread ID
+            content: The message content
+            role: "user" or "ai"
+            agent_id: The agent ID (for AI messages)
+            agent_name: The agent name (for AI messages)
+            metadata: Additional metadata
+
+        Returns:
+            The saved message dict
+        """
+        message_id = str(uuid.uuid4())
+        now = datetime.utcnow().isoformat()
+        name = agent_name or ("assistant" if role == "ai" else "user")
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                """
+                INSERT INTO messages
+                (message_id, thread_id, role, name, content, agent_id, created_at, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (message_id, thread_id, role, name, content, agent_id, now, json.dumps(metadata) if metadata else None)
+            )
+
+            # Update thread's updated_at timestamp
+            conn.execute(
+                "UPDATE threads SET updated_at = ? WHERE thread_id = ?",
+                (now, thread_id)
+            )
+
+            conn.commit()
+        finally:
+            conn.close()
+
+        return {
+            "id": message_id,
+            "role": role,
+            "name": name,
+            "content": content,
+            "agent_id": agent_id,
+            "thread_id": thread_id,
+            "created_at": now,
+            "metadata": metadata or {},
+        }
+
+    def get_messages(
+        self,
+        thread_id: str,
+        limit: int = 100,
+    ) -> List[Dict]:
+        """
+        Get all messages for a conversation thread.
+
+        Args:
+            thread_id: The conversation thread ID
+            limit: Maximum number of messages to return
+
+        Returns:
+            List of message dicts
+        """
+        conn = sqlite3.connect(self.db_path)
+        try:
+            cursor = conn.execute(
+                """
+                SELECT message_id, role, name, content, agent_id, created_at, metadata
+                FROM messages
+                WHERE thread_id = ?
+                ORDER BY created_at ASC
+                LIMIT ?
+                """,
+                (thread_id, limit)
+            )
+
+            results = []
+            for row in cursor.fetchall():
+                metadata = json.loads(row[6]) if row[6] else {}
+                results.append({
+                    "id": row[0],
+                    "role": row[1],
+                    "name": row[2],
+                    "content": row[3],
+                    "agent_id": row[4],
+                    "thread_id": thread_id,
+                    "created_at": row[5],
+                    "metadata": metadata,
+                })
+
+            return results
+        finally:
+            conn.close()
+
+    def clear_messages(self, thread_id: str) -> bool:
+        """
+        Clear all messages for a conversation thread.
+
+        Args:
+            thread_id: The conversation thread ID
+
+        Returns:
+            True if successful
+        """
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "DELETE FROM messages WHERE thread_id = ?",
+                (thread_id,)
+            )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+    def get_thread_info(self, thread_id: str) -> Optional[Dict]:
+        """
+        Get information about a thread.
+
+        Args:
+            thread_id: The conversation thread ID
+
+        Returns:
+            Thread info dict or None
+        """
+        conn = sqlite3.connect(self.db_path)
+        try:
+            cursor = conn.execute(
+                """
+                SELECT t.thread_id, t.agent_id, t.created_at, t.updated_at,
+                       COUNT(m.message_id) as message_count
+                FROM threads t
+                LEFT JOIN messages m ON t.thread_id = m.thread_id
+                WHERE t.thread_id = ?
+                GROUP BY t.thread_id
+                """,
+                (thread_id,)
+            )
+
+            row = cursor.fetchone()
+            if row:
+                return {
+                    "thread_id": row[0],
+                    "agent_id": row[1],
+                    "created_at": row[2],
+                    "updated_at": row[3],
+                    "message_count": row[4],
+                }
+            return None
+        finally:
+            conn.close()
+
+    def list_threads(self, agent_id: Optional[str] = None) -> List[Dict]:
+        """
+        List all conversation threads.
+
+        Args:
+            agent_id: Optional filter by agent ID
+
+        Returns:
+            List of thread info dicts
+        """
+        conn = sqlite3.connect(self.db_path)
+        try:
+            query = """
+                SELECT t.thread_id, t.agent_id, t.created_at, t.updated_at,
+                       COUNT(m.message_id) as message_count
+                FROM threads t
+                LEFT JOIN messages m ON t.thread_id = m.thread_id
+            """
+            params = []
+
+            if agent_id:
+                query += " WHERE t.agent_id = ?"
+                params.append(agent_id)
+
+            query += " GROUP BY t.thread_id ORDER BY t.updated_at DESC"
+
+            cursor = conn.execute(query, params)
+
+            results = []
+            for row in cursor.fetchall():
+                results.append({
+                    "thread_id": row[0],
+                    "agent_id": row[1],
+                    "created_at": row[2],
+                    "updated_at": row[3],
+                    "message_count": row[4],
+                })
+
+            return results
+        finally:
+            conn.close()
+
+    def delete_thread(self, thread_id: str) -> bool:
+        """
+        Delete a conversation thread and all its messages.
+
+        Args:
+            thread_id: The conversation thread ID
+
+        Returns:
+            True if successful
+        """
+        conn = sqlite3.connect(self.db_path)
+        try:
+            # Messages will be deleted due to ON DELETE CASCADE
+            conn.execute(
+                "DELETE FROM threads WHERE thread_id = ?",
+                (thread_id,)
+            )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+
+# Global conversation memory instance
+conversation_memory = ConversationMemory()
+
+
+# =============================================================================
+# Legacy Memory Providers (kept for backward compatibility)
+# =============================================================================
 
 class BaseMemory(ABC):
     @abstractmethod
@@ -79,7 +406,6 @@ class SQLiteMemoryProvider(BaseMemory):
             "CREATE TABLE IF NOT EXISTS memories "
             "(id TEXT PRIMARY KEY, user_id TEXT, text TEXT, created_at REAL, scope TEXT DEFAULT 'user')"
         )
-        # migrate: add scope column if missing
         try:
             self.conn.execute("ALTER TABLE memories ADD COLUMN scope TEXT DEFAULT 'user'")
             self.conn.commit()
@@ -188,22 +514,26 @@ def get_memory_provider(agent_id: str) -> BaseMemory:
     return Mem0Provider(mem0_config)
 
 
-# ─── MEMORY.md helpers (Claude Code pattern) ─────────────────────────────────
+# =============================================================================
+# MEMORY.md helpers
+# =============================================================================
+
+_MEMORY_MD_MAX_LINES = 200
+_MEMORY_MD_MAX_BYTES = 25_000
+
 
 def load_memory_md(agent_id: str) -> str:
-    """Load MEMORY.md with line/byte truncation (mirrors Claude Code MAX_ENTRYPOINT_*)."""
+    """Load MEMORY.md with line/byte truncation."""
     path = os.path.join(AGENTS_DIR, agent_id, "core", "MEMORY.md")
     if not os.path.exists(path):
         return ""
     with open(path, "r", encoding="utf-8") as f:
         raw = f.read()
 
-    # Byte cap first
     if len(raw.encode("utf-8")) > _MEMORY_MD_MAX_BYTES:
         raw = raw.encode("utf-8")[:_MEMORY_MD_MAX_BYTES].decode("utf-8", errors="ignore")
         raw += "\n\n[...MEMORY.md truncated at 25 KB...]"
 
-    # Line cap
     lines = raw.split("\n")
     if len(lines) > _MEMORY_MD_MAX_LINES:
         lines = lines[:_MEMORY_MD_MAX_LINES]
@@ -225,7 +555,6 @@ def get_core_file(agent_id: str, filename: str) -> str:
 def list_core_files_with_headers(agent_id: str) -> List[Tuple[str, str]]:
     """
     Return [(filename, first_line_header), ...] for all .md files in core/.
-    Used by find_relevant_memories() to build the selector context.
     """
     core_dir = os.path.join(AGENTS_DIR, agent_id, "core")
     results = []
@@ -245,10 +574,7 @@ def list_core_files_with_headers(agent_id: str) -> List[Tuple[str, str]]:
 
 
 def get_agent_memory_by_scope(agent_id: str) -> Dict[str, List[Dict]]:
-    """
-    Group episodic memories by scope (user / project / session).
-    Mirrors Claude Code's AgentMemoryScope.
-    """
+    """Group episodic memories by scope (user / project / session)."""
     mem = get_memory_provider(agent_id)
     all_mems = mem.get_all(agent_id)
     scoped: Dict[str, List[Dict]] = {"user": [], "project": [], "session": []}
@@ -259,10 +585,12 @@ def get_agent_memory_by_scope(agent_id: str) -> Dict[str, List[Dict]]:
     return scoped
 
 
-# ─── Context compaction (Claude Code: maybe_compact_messages) ─────────────────
+# =============================================================================
+# Context compaction
+# =============================================================================
 
 def _estimate_tokens(messages: List[Dict]) -> int:
-    """Rough token estimate: 1 token ≈ 4 chars."""
+    """Rough token estimate: 1 token ~ 4 chars."""
     total = sum(len(str(m.get("content", ""))) for m in messages)
     return total // 4
 
@@ -271,7 +599,7 @@ def _get_context_limit(model: str) -> int:
     for key, limit in CONTEXT_LIMITS.items():
         if key in model.lower():
             return limit
-    return 32_000  # conservative fallback
+    return 32_000
 
 
 async def maybe_compact_messages(
@@ -282,7 +610,7 @@ async def maybe_compact_messages(
 ) -> List[Dict]:
     """
     If conversation exceeds 75% of model context, summarise old turns and keep
-    the last _KEEP_RECENT_TURNS verbatim. Returns the (possibly compacted) list.
+    the last _KEEP_RECENT_TURNS verbatim.
     """
     limit = _get_context_limit(model)
     used = _estimate_tokens(messages)
@@ -291,12 +619,11 @@ async def maybe_compact_messages(
 
     print(f"DEBUG: Compaction triggered — {used} estimated tokens, limit {limit}")
 
-    system_msgs = [m for m in messages if m["role"] == "system"]
-    convo_msgs = [m for m in messages if m["role"] != "system"]
+    system_msgs = [m for m in messages if m.get("role") == "system"]
+    convo_msgs = [m for m in messages if m.get("role") != "system"]
 
-    # Keep recent turns verbatim
     if len(convo_msgs) <= _KEEP_RECENT_TURNS * 2:
-        return messages  # nothing to compact
+        return messages
 
     old_msgs = convo_msgs[:-(_KEEP_RECENT_TURNS * 2)]
     recent_msgs = convo_msgs[-(_KEEP_RECENT_TURNS * 2):]
@@ -305,7 +632,7 @@ async def maybe_compact_messages(
         "Summarise the following conversation in concise bullet points, "
         "preserving key facts, decisions, and context that would be needed "
         "to continue the conversation. Be thorough but brief.\n\n"
-        + "\n".join(f"{m['role'].upper()}: {m['content']}" for m in old_msgs)
+        + "\n".join(f"{m.get('role', 'unknown').upper()}: {m.get('content', '')}" for m in old_msgs)
     )
 
     compact_model = fast_model or model

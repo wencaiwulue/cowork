@@ -14,9 +14,11 @@ import Settings from './Settings';
 import NewSession from './NewSession';
 import '../index.css';
 
+type ViewType = 'agents' | 'team' | 'chat' | 'skills' | 'schedules' | 'connectors' | 'channels' | 'pairings' | 'settings' | 'create-team' | 'new-session' | 'langchain';
+
 const App: React.FC = () => {
-  const [view, setView] = useState<'agents' | 'team' | 'chat' | 'skills' | 'schedules' | 'connectors' | 'channels' | 'pairings' | 'settings' | 'create-team' | 'new-session'>('chat');
-  const [prevView, setPrevView] = useState<'agents' | 'team' | 'chat' | 'skills' | 'schedules' | 'connectors' | 'channels' | 'pairings' | 'settings' | 'create-team' | 'new-session'>('chat');
+  const [view, setView] = useState<ViewType>('chat');
+  const [prevView, setPrevView] = useState<ViewType>('chat');
   const [selectedTeamName, setSelectedTeamName] = useState<string>('dev-team');
   const [showFiles, setShowFiles] = useState(false);
 
@@ -50,12 +52,19 @@ const App: React.FC = () => {
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', background: 'var(--bg-primary)' }}>
         {view === 'agents' && (
           <div style={{ flex: 1, overflow: 'auto' }}>
-            <AgentLibrary 
+            <AgentLibrary
               onChat={(id) => {
-                setSelectedTeamName(id);
-                handleViewChange('chat');
-              }} 
-              onCreateTeam={(id) => handleViewChange('team')}
+                // Navigate to new-session with the selected agent pre-selected
+                // Store the selected agent ID in a state or pass it via a different mechanism
+                // For now, we'll use a custom event to communicate the pre-selected agent
+                window.dispatchEvent(new CustomEvent('preselect-agent', { detail: id }));
+                handleViewChange('new-session');
+              }}
+              onCreateTeam={(id) => {
+                // Dispatch event with selected agent id for team creation
+                window.dispatchEvent(new CustomEvent('preselect-agent-for-team', { detail: id }));
+                handleViewChange('create-team');
+              }}
             />
           </div>
         )}

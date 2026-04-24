@@ -378,7 +378,8 @@ const AgentLibrary: React.FC<AgentLibraryProps> = ({ onChat, onCreateTeam }) => 
             <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'var(--bg-input)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '32px', marginBottom: '16px' }}>{agent.avatar}</div>
             <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: 'bold', color: 'var(--text-primary)' }}>{agent.name}</h3>
             <p style={{ fontSize: '12px', color: 'var(--text-secondary)', textAlign: 'center', margin: '0 0 20px 0', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{agent.description}</p>
-            <button onClick={(e) => { e.stopPropagation(); onChat?.(agent.id); }} style={{ width: '100%', padding: '10px', borderRadius: '12px', background: 'rgba(52, 199, 89, 0.15)', color: '#34c759', border: 'none', fontWeight: 'bold', fontSize: '14px', cursor: 'pointer', marginBottom: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}><span>+</span> Chat</button>
+            <button onClick={(e) => { e.stopPropagation(); onChat?.(agent.id); }} style={{ width: '100%', padding: '10px', borderRadius: '12px', background: 'rgba(52, 199, 89, 0.15)', color: '#34c759', border: 'none', fontWeight: 'bold', fontSize: '14px', cursor: 'pointer', marginBottom: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}><span>+</span> Chat</button>
+            <button onClick={(e) => { e.stopPropagation(); onCreateTeam?.(agent.id); }} style={{ width: '100%', padding: '8px', borderRadius: '12px', background: 'var(--bg-hover)', color: 'var(--text-secondary)', border: '1px solid var(--border)', fontWeight: '500', fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}><span>👥</span> Create Team</button>
           </div>
         ))}
       </div>

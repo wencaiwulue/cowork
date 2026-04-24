@@ -81,6 +81,22 @@ function isPortFree(port) {
     server.listen(port);
   });
 }
+async function waitForBackend(port, timeout) {
+  const startTime = Date.now();
+  const checkInterval = 500;
+  const backendUrl = `http://127.0.0.1:${port}`;
+  while (Date.now() - startTime < timeout) {
+    try {
+      const response = await fetch(`${backendUrl}/agents`, { method: "GET" });
+      if (response.ok) {
+        return true;
+      }
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, checkInterval));
+    }
+  }
+  return false;
+}
 function startPythonBackend(port) {
   const backendPath = path__namespace.join(process.cwd(), "backend", "main.py");
   const pythonCmd = process.platform === "win32" ? "python" : "python3";
@@ -98,8 +114,9 @@ function startPythonBackend(port) {
       backendProcess.kill();
   });
 }
+let mainWindow = null;
 function createWindow() {
-  const win = new electron.BrowserWindow({
+  mainWindow = new electron.BrowserWindow({
     width: 1200,
     height: 800,
     icon: path__namespace.join(__dirname, "../src/assets/icon.png"),
@@ -107,19 +124,32 @@ function createWindow() {
       nodeIntegration: true,
       contextIsolation: false
     },
-    title: "CoWork"
+    title: "CoWork",
+    show: false
+    // Don't show until backend is ready
   });
   process.env.BACKEND_URL = `http://127.0.0.1:${backendPort}`;
   if (process.env.VITE_DEV_SERVER_URL) {
-    win.loadURL(process.env.VITE_DEV_SERVER_URL);
+    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
-    win.loadFile(path__namespace.join(__dirname, "../dist/index.html"));
+    mainWindow.loadFile(path__namespace.join(__dirname, "../dist/index.html"));
   }
+  return mainWindow;
 }
 electron.app.whenReady().then(async () => {
   backendPort = await findFreePort(51234);
   startPythonBackend(backendPort);
-  createWindow();
+  const win = createWindow();
+  console.log("Waiting for backend to be ready...");
+  const backendReady = await waitForBackend(backendPort, 6e4);
+  if (backendReady) {
+    console.log("Backend is ready! Showing window and notifying frontend...");
+    win == null ? void 0 : win.show();
+    win == null ? void 0 : win.webContents.send("backend-ready", { backendUrl: `http://127.0.0.1:${backendPort}` });
+  } else {
+    console.error("Backend failed to start within timeout. Showing window anyway...");
+    win == null ? void 0 : win.show();
+  }
   electron.app.on("activate", () => {
     if (electron.BrowserWindow.getAllWindows().length === 0) {
       createWindow();

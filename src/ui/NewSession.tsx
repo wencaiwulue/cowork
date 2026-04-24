@@ -32,7 +32,18 @@ const NewSession: React.FC<NewSessionProps> = ({ onSessionCreated, onCancel }) =
     fetchAgents();
     // Focus input on mount
     inputRef.current?.focus();
-  }, []);
+
+    // Listen for pre-selected agent from AgentLibrary
+    const handlePreselectAgent = (e: CustomEvent) => {
+      const agentId = e.detail;
+      const agent = agents.find(a => a.id === agentId);
+      if (agent) {
+        setSelectedAgent(agent);
+      }
+    };
+    window.addEventListener('preselect-agent', handlePreselectAgent as EventListener);
+    return () => window.removeEventListener('preselect-agent', handlePreselectAgent as EventListener);
+  }, [agents]);
 
   const fetchAgents = async () => {
     try {
@@ -74,17 +85,23 @@ const NewSession: React.FC<NewSessionProps> = ({ onSessionCreated, onCancel }) =
         // Start agent stream to receive response
         // The stream will handle the message sending and response processing
         const history: Array<{role: 'user' | 'assistant'; content: string}> = [];
-        startAgentStream(session.id, selectedAgent.id, inputValue, history, backendUrl);
 
-        // Notify parent - the TeamChat will load messages from backend
-        onSessionCreated?.(session.id);
-        window.dispatchEvent(new CustomEvent('session-created', { detail: session.id }));
+        // Wait for stream to complete before notifying parent
+        // This ensures the agent's response has been saved to the backend
+        // before TeamChat tries to load messages
+        startAgentStream(session.id, selectedAgent.id, inputValue, history, backendUrl, () => {
+          // Stream completed - now notify parent
+          console.log('[NewSession] Stream completed, notifying parent');
+          onSessionCreated?.(session.id);
+          window.dispatchEvent(new CustomEvent('session-created', { detail: session.id }));
+          setIsLoading(false);
+        });
       }
     } catch (e) {
       console.error('Failed to create session:', e);
-    } finally {
       setIsLoading(false);
     }
+    // Note: isLoading is set to false in the stream completion callback
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

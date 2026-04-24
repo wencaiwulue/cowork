@@ -47,9 +47,23 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onViewChange, selectedTe
   const backendUrl = getBackendUrl();
 
   useEffect(() => {
+    // Listen for backend-ready event from main process
+    const handleBackendReady = () => {
+      console.log("[Sidebar] Backend ready, fetching initial data...");
+      fetchData();
+    };
+
+    // @ts-ignore - electron API
+    if (window.require) {
+      const { ipcRenderer } = window.require('electron');
+      ipcRenderer.on('backend-ready', handleBackendReady);
+    }
+
+    // Also try to fetch data immediately (for web/browser mode)
     fetchData();
+
     const interval = setInterval(fetchData, 5000);
-    
+
     const handleRefresh = () => {
       console.log("Sidebar refresh triggered");
       fetchData();
@@ -61,6 +75,11 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onViewChange, selectedTe
       clearInterval(interval);
       window.removeEventListener('session-created', handleRefresh);
       window.removeEventListener('refresh-sidebar', handleRefresh);
+      // @ts-ignore - electron API
+      if (window.require) {
+        const { ipcRenderer } = window.require('electron');
+        ipcRenderer.removeListener('backend-ready', handleBackendReady);
+      }
     };
   }, []);
 
@@ -169,7 +188,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onViewChange, selectedTe
       height: '100%',
     }}>
       <div style={{ padding: '24px 16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <img src="/logo.png" alt="CoWork Logo" style={{ width: '32px', height: '32px', borderRadius: '8px' }} />
+        <img src="/logo.svg" style={{ width: '32px', height: '32px', borderRadius: '10px' }} />
         <div style={{ fontSize: '20px', fontWeight: 'bold', color: 'var(--text-primary)' }}>CoWork</div>
       </div>
       

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu } from 'electron';
+import { app, BrowserWindow, Menu, ipcMain } from 'electron';
 import * as path from 'path';
 import { spawn, ChildProcess } from 'child_process';
 import * as net from 'net';
@@ -69,6 +69,26 @@ function isPortFree(port: number): Promise<boolean> {
   });
 }
 
+async function waitForBackend(port: number, timeout: number): Promise<boolean> {
+  const startTime = Date.now();
+  const checkInterval = 500; // Check every 500ms
+  const backendUrl = `http://127.0.0.1:${port}`;
+
+  while (Date.now() - startTime < timeout) {
+    try {
+      // Try to fetch a simple endpoint to check if backend is ready
+      const response = await fetch(`${backendUrl}/agents`, { method: 'GET' });
+      if (response.ok) {
+        return true;
+      }
+    } catch {
+      // Backend not ready yet, wait and retry
+      await new Promise(resolve => setTimeout(resolve, checkInterval));
+    }
+  }
+  return false;
+}
+
 function startPythonBackend(port: number) {
   const backendPath = path.join(process.cwd(), 'backend', 'main.py');
   
@@ -92,8 +112,10 @@ function startPythonBackend(port: number) {
   });
 }
 
+let mainWindow: BrowserWindow | null = null;
+
 function createWindow() {
-  const win = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     icon: path.join(__dirname, '../src/assets/icon.png'),
@@ -102,6 +124,7 @@ function createWindow() {
       contextIsolation: false,
     },
     title: 'CoWork',
+    show: false, // Don't show until backend is ready
   });
 
   // Inject dynamic backend URL into the window process
@@ -110,17 +133,36 @@ function createWindow() {
   // In development, you might be loading from Vite (localhost:5173)
   // For simplicity, we'll continue with file loading or adjust based on your vite setup
   if (process.env.VITE_DEV_SERVER_URL) {
-    win.loadURL(process.env.VITE_DEV_SERVER_URL);
+    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
     // Correctly point to the bundled HTML in dist/
-    win.loadFile(path.join(__dirname, '../dist/index.html'));
+    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
+
+  return mainWindow;
 }
 
 app.whenReady().then(async () => {
   backendPort = await findFreePort(51234);
   startPythonBackend(backendPort);
-  createWindow();
+
+  // Create window but don't show it yet
+  const win = createWindow();
+
+  // Wait for backend to be ready
+  console.log('Waiting for backend to be ready...');
+  const backendReady = await waitForBackend(backendPort, 60000);
+
+  if (backendReady) {
+    console.log('Backend is ready! Showing window and notifying frontend...');
+    win?.show();
+
+    // Notify frontend that backend is ready
+    win?.webContents.send('backend-ready', { backendUrl: `http://127.0.0.1:${backendPort}` });
+  } else {
+    console.error('Backend failed to start within timeout. Showing window anyway...');
+    win?.show();
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
