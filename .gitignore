@@ -16,3 +16,4 @@ desktop/release/
 dist/claude-local
 dist/
 *.node
+.commit-state.json

@@ -34,7 +34,8 @@
     "desktop:release-ci": "node desktop/scripts/release-ci.mjs",
     "desktop:production-gate": "node desktop/scripts/production-gate.mjs",
     "desktop:verify-production-gate-evidence": "node desktop/scripts/production-gate.mjs verify --evidence desktop/release/production-gate-evidence.json --published-evidence desktop/release/publish/downloaded-evidence/published-release-evidence.json",
-    "desktop:prod-check": "node desktop/scripts/production-readiness.mjs"
+    "desktop:prod-check": "node desktop/scripts/production-readiness.mjs",
+    "wcommit": "node scripts/weekend-commit.mjs"
   },
   "dependencies": {
     "@alcalzone/ansi-tokenize": "latest",
