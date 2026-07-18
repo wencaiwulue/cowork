@@ -4410,15 +4410,41 @@ export function App() {
   function slashPrompt(command: string): string {
     switch (command) {
       case '/review-diff':
-        return 'Review the current git diff. Focus on correctness, regressions, and missing tests.'
+        return 'Please review the current uncommitted git changes. Focus on: correctness issues, potential regressions, missing edge cases, and missing tests. Provide specific actionable feedback.'
       case '/explain-file':
         return activeFile
-          ? `Explain @${activeFile}. Include the main responsibilities and risky parts.`
-          : 'Explain the file I open next. Ask me to choose a file if none is selected.'
+          ? `Please explain the file @${activeFile} in detail. Cover: main purpose, key functions/classes, data flow, and any potentially tricky or risky parts.`
+          : 'Please explain the file I will reference. I will open or mention a file next.'
       case '/run-tests':
-        return 'Run the relevant project tests, summarize failures, and fix only the issues needed for this change.'
+        return 'Please run the relevant tests for this project, identify any failures, and fix only the issues that are clearly related to recent changes. Summarize what was tested and what passed/failed.'
+      case '/fix-bugs':
+        return 'Please analyze the codebase for bugs. Look for: logic errors, edge cases not handled, null/undefined issues, race conditions, and resource leaks. Fix confirmed bugs and explain each fix.'
+      case '/refactor':
+        return 'Please refactor the selected or referenced code to improve clarity, reduce duplication, and follow best practices. Do not change behavior unless fixing a clear bug. Explain the refactoring decisions.'
+      case '/terminal':
+        return ''
+      case '/files':
+        return ''
+      case '/refresh':
+        return ''
+      case '/new-agent':
+        return ''
+      case '/new-team':
+        return ''
+      case '/new-global-task':
+        return ''
+      case '/add-mcp':
+        return ''
+      case '/new-skill':
+        return ''
+      case '/plugins':
+        return ''
+      case '/reload-config':
+        return ''
+      case '/diagnostics':
+        return ''
       default:
-        return command
+        return command.startsWith('/') ? command.slice(1) + ': ' : command
     }
   }
 
@@ -4441,6 +4467,8 @@ export function App() {
     const trigger = currentComposerTrigger
     if (!trigger) return
     if (item.disabled || loadingLabel) return
+    
+    // Action items: execute directly without inserting text
     if (item.action) {
       setInput(value => value.slice(0, trigger.start) + value.slice(trigger.end))
       setComposerCursor(trigger.start)
@@ -4448,24 +4476,39 @@ export function App() {
       window.requestAnimationFrame(() => composerTextareaRef.current?.focus())
       return
     }
-    const value = item.value?.startsWith('/')
-      ? slashPrompt(item.value)
-      : item.value
-    if (!value) return
-    const result = applyComposerMenuValue({
-      input,
-      cursor: composerCursor,
-      value,
-    })
-    const nextInput = result.input
-    const nextCursor = result.cursor
-    setInput(nextInput)
-    setComposerCursor(nextCursor)
+    
+    // Slash commands
+    if (trigger.kind === '/') {
+      const promptText = item.value?.startsWith('/') ? slashPrompt(item.value) : item.value
+      if (promptText) {
+        // Insert the generated prompt
+        const result = applyComposerMenuValue({ input, cursor: composerCursor, value: promptText })
+        setInput(result.input)
+        setComposerCursor(result.cursor)
+        window.requestAnimationFrame(() => {
+          const textarea = composerTextareaRef.current
+          if (!textarea) return
+          textarea.focus()
+          textarea.setSelectionRange(result.cursor, result.cursor)
+        })
+      } else {
+        // Empty value means navigation action, clear the /
+        setInput(value => value.slice(0, trigger.start) + value.slice(trigger.end))
+        setComposerCursor(trigger.start)
+      }
+      return
+    }
+    
+    // @ mentions: insert @mention value with trailing space
+    const value = item.value ?? ''
+    const result = applyComposerMenuValue({ input, cursor: composerCursor, value })
+    setInput(result.input)
+    setComposerCursor(result.cursor)
     window.requestAnimationFrame(() => {
       const textarea = composerTextareaRef.current
       if (!textarea) return
       textarea.focus()
-      textarea.setSelectionRange(nextCursor, nextCursor)
+      textarea.setSelectionRange(result.cursor, result.cursor)
     })
   }
 
@@ -4703,6 +4746,39 @@ export function App() {
     )
   }
 
+
+  function resolveChatTargetFromInput(text: string): { target: ChatTarget; cleanText: string } {
+    let target = chatTarget
+    let cleanText = text
+    
+    // Check for @agent:name pattern
+    const agentMatch = text.match(/@agent:([\w-]+)/)
+    if (agentMatch) {
+      const agentName = agentMatch[1]
+      const agentExists = agentList.allAgents.some(a => a.agentType === agentName)
+      if (agentExists) {
+        target = { type: 'agent', teamName: '', agentType: agentName }
+        cleanText = cleanText.replace(agentMatch[0], '').trim()
+      }
+    }
+    
+    // Check for @team:name pattern
+    const teamMatch = text.match(/@team:([\w-]+)/)
+    if (teamMatch) {
+      const teamName = teamMatch[1]
+      const teamExists = teams.some(t => t.name === teamName)
+      if (teamExists) {
+        target = { type: 'team', teamName, agentType: '' }
+        cleanText = cleanText.replace(teamMatch[0], '').trim()
+      }
+    }
+    
+    // @skill:name and @mcp:name are just contextual references for Claude, leave them in text
+    // @file/path references also stay in the prompt for Claude
+    
+    return { target, cleanText }
+  }
+
   async function sendMessage(): Promise<void> {
     if (!activeSession) {
       setConversationNotice({ kind: 'error', text: 'Select a session before sending a message.' })
@@ -4736,39 +4812,57 @@ export function App() {
     }
     const session = activeSession
     sendActionPendingRef.current = true
-    const text = input.trim()
+    const rawText = input.trim()
+    const { target: resolvedTarget, cleanText } = resolveChatTargetFromInput(rawText)
+    const text = cleanText
     setInput('')
     setComposerCursor(0)
     setConversationNotice(undefined)
+    
+    // Validate resolved target
+    if (resolvedTarget.type === 'team' && !resolvedTarget.teamName.trim()) {
+      setConversationNotice({ kind: 'error', text: 'Team not found.' })
+      sendActionPendingRef.current = false
+      return
+    }
+    if (resolvedTarget.type === 'agent' && !resolvedTarget.agentType.trim()) {
+      setConversationNotice({ kind: 'error', text: 'Agent not found.' })
+      sendActionPendingRef.current = false
+      return
+    }
     try {
       await runAction('Sending message', async () => {
-        if (chatTarget.type === 'team') {
-          recordOutgoingRpcMessage(session.id, 'team:send', { teamName: chatTarget.teamName, message: text })
+        if (resolvedTarget.type === 'team') {
+          recordOutgoingRpcMessage(session.id, 'team:send', { teamName: resolvedTarget.teamName, message: text })
           await window.claudeDesktop.teams.send(session.id, {
-            teamName: chatTarget.teamName,
+            teamName: resolvedTarget.teamName,
             to: '*',
             message: text,
           })
           if (activeSessionIdRef.current !== session.id) return
           setConversationNotice({
             kind: 'success',
-            text: `Sent message to team ${chatTarget.teamName}.`,
+            text: `Sent message to team ${resolvedTarget.teamName}.`,
           })
+          // Reset target back to session after team send
+          setChatTarget({ type: 'session', teamName: '', agentType: '' })
           return
         }
-        if (chatTarget.type === 'agent') {
-          recordOutgoingRpcMessage(session.id, 'agent:launch', { agentType: chatTarget.agentType, prompt: text })
+        if (resolvedTarget.type === 'agent') {
+          recordOutgoingRpcMessage(session.id, 'agent:launch', { agentType: resolvedTarget.agentType, prompt: text })
           await window.claudeDesktop.sessions.launchAgentTask(session.id, {
-            agentType: chatTarget.agentType,
-            description: `Chat with ${chatTarget.agentType}`,
+            agentType: resolvedTarget.agentType,
+            description: `Chat with ${resolvedTarget.agentType}`,
             prompt: text,
             runInBackground: false,
           })
           if (activeSessionIdRef.current !== session.id) return
           setConversationNotice({
             kind: 'success',
-            text: `Sent message to agent ${chatTarget.agentType}.`,
+            text: `Sent message to agent ${resolvedTarget.agentType}.`,
           })
+          // Reset target back to session after agent send
+          setChatTarget({ type: 'session', teamName: '', agentType: '' })
           return
         }
         recordOutgoingRpcMessage(session.id, 'user:send', { text })
