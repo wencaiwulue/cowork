@@ -266,7 +266,11 @@ type ComposerMenuItem = {
   action?: () => void
   disabled?: boolean
   disabledReason?: string
+  group?: string
+  icon?: IconName
 }
+type ComposerMenuDivider = { divider: true; label: string }
+type ComposerMenuEntry = ComposerMenuItem | ComposerMenuDivider
 type CommandPaletteItem = {
   id: string
   label: string
@@ -3312,7 +3316,7 @@ export function App() {
     () => composerTrigger(input, composerCursor) ?? composerTrigger(input, input.length),
     [composerCursor, input],
   )
-  const composerMenuItems = useMemo<ComposerMenuItem[]>(() => {
+  const composerMenuItems = useMemo<ComposerMenuEntry[]>(() => {
     if (!currentComposerTrigger) return []
     const query = normalizeMenuFilter(currentComposerTrigger.query)
     const matches = (value: string): boolean =>
@@ -3332,16 +3336,24 @@ export function App() {
       }))
     }
     if (currentComposerTrigger.kind === '@') {
-      if (!activeSession) return []
-      const fileItems = flatTree
-        .filter(entry => entry.type === 'file' && matches(entry.path))
-        .slice(0, 8)
-        .map(entry => ({
-          id: `file:${entry.path}`,
-          label: entry.path,
-          detail: 'File',
-          value: `@${entry.path}`,
+      const items: ComposerMenuEntry[] = []
+      if (!activeSession) return items
+      
+      // Agents group
+      const agentItems = agentList.allAgents
+        .filter(agent => matches(agent.agentType))
+        .slice(0, 6)
+        .map(agent => ({
+          id: `agent:${agent.source}:${agent.agentType}`,
+          label: agent.agentType,
+          detail: `Agent · ${agent.source}`,
+          value: `@agent:${agent.agentType}`,
+          group: 'Agents',
+          icon: 'bot' as IconName,
         }))
+      if (agentItems.length) items.push({ divider: true, label: 'Agents' }, ...agentItems)
+      
+      // Teams group
       const teamItems = teams
         .filter(team => matches(team.name))
         .slice(0, 4)
@@ -3350,16 +3362,26 @@ export function App() {
           label: team.name,
           detail: `${team.members.length} teammate${team.members.length === 1 ? '' : 's'}`,
           value: `@team:${team.name}`,
+          group: 'Teams',
+          icon: 'users' as IconName,
         }))
-      const agentItems = agentList.allAgents
-        .filter(agent => matches(agent.agentType))
-        .slice(0, 5)
-        .map(agent => ({
-          id: `agent:${agent.source}:${agent.agentType}`,
-          label: agent.agentType,
-          detail: `Agent · ${agent.source}`,
-          value: `@agent:${agent.agentType}`,
+      if (teamItems.length) items.push({ divider: true, label: 'Teams' }, ...teamItems)
+      
+      // Files group
+      const fileItems = flatTree
+        .filter(entry => entry.type === 'file' && matches(entry.path))
+        .slice(0, 6)
+        .map(entry => ({
+          id: `file:${entry.path}`,
+          label: entry.path.split('/').pop() ?? entry.path,
+          detail: entry.path,
+          value: `@${entry.path}`,
+          group: 'Files',
+          icon: 'file' as IconName,
         }))
+      if (fileItems.length) items.push({ divider: true, label: 'Files' }, ...fileItems)
+      
+      // Skills group
       const skillItems = [
         ...(desktopConfig?.skills ?? []).map(skill => ({ ...skill, scope: 'user' })),
         ...projectSkills.map(skill => ({ ...skill, scope: 'project' })),
@@ -3371,7 +3393,12 @@ export function App() {
           label: skill.name,
           detail: `Skill · ${skill.scope}`,
           value: `@skill:${skill.name}`,
+          group: 'Skills',
+          icon: 'bot' as IconName,
         }))
+      if (skillItems.length) items.push({ divider: true, label: 'Skills' }, ...skillItems)
+      
+      // MCP group
       const mcpItems = [
         ...(desktopConfig?.mcpServers ?? []).map(server => ({ ...server, scope: 'user' })),
         ...projectMcpServers.map(server => ({ ...server, scope: 'project' })),
@@ -3387,8 +3414,12 @@ export function App() {
           label: server.name,
           detail: `MCP · ${server.scope}${server.enabled === false ? ' · disabled' : ''}${server.approvalStatus && server.approvalStatus !== 'approved' ? ` · ${server.approvalStatus}` : ''}`,
           value: `@mcp:${server.name}`,
+          group: 'MCP Servers',
+          icon: 'terminal' as IconName,
         }))
-      return withComposerMenuAvailability([...fileItems, ...teamItems, ...agentItems, ...skillItems, ...mcpItems].slice(0, 14))
+      if (mcpItems.length) items.push({ divider: true, label: 'MCP Servers' }, ...mcpItems)
+      
+      return withComposerMenuAvailability(items.slice(0, 25))
     }
     const customCommandItems: ComposerMenuItem[] = activeSession
       ? customCommands
@@ -3405,43 +3436,75 @@ export function App() {
           value: `/${command.name}`,
         }))
       : []
-    const actions: ComposerMenuItem[] = [
+    const slashActions: ComposerMenuEntry[] = [
+      { divider: true, label: 'Prompt' },
       {
         id: 'action:review-diff',
-        label: 'Review diff',
-        detail: 'Insert a review prompt for current git changes',
+        label: 'review-diff',
+        detail: 'Review current git changes and suggest improvements',
+        icon: 'diff',
         disabled: workspaceActionDisabled,
         disabledReason: workspaceActionDisabledReason,
         value: '/review-diff',
       },
       {
         id: 'action:explain-file',
-        label: 'Explain current file',
-        detail: activeFile ?? 'Open a file first',
+        label: 'explain-file',
+        detail: activeFile ? `Explain ${activeFile}` : 'Open a file first',
+        icon: 'file',
         disabled: workspaceActionDisabled,
         disabledReason: workspaceActionDisabledReason,
         value: '/explain-file',
       },
       {
         id: 'action:run-tests',
-        label: 'Run tests',
-        detail: 'Ask Claude to run the project test command',
+        label: 'run-tests',
+        detail: 'Run the project test suite',
+        icon: 'play',
         disabled: workspaceActionDisabled,
         disabledReason: workspaceActionDisabledReason,
         value: '/run-tests',
       },
       {
+        id: 'action:fix-bugs',
+        label: 'fix-bugs',
+        detail: 'Find and fix bugs in the current codebase',
+        icon: 'check',
+        disabled: workspaceActionDisabled,
+        disabledReason: workspaceActionDisabledReason,
+        value: '/fix-bugs',
+      },
+      {
+        id: 'action:refactor',
+        label: 'refactor',
+        detail: 'Refactor selected code for clarity and performance',
+        icon: 'code',
+        disabled: workspaceActionDisabled,
+        disabledReason: workspaceActionDisabledReason,
+        value: '/refactor',
+      },
+      { divider: true, label: 'Navigation' },
+      {
         id: 'action:open-terminal',
-        label: 'Open terminal',
-        detail: 'Switch to the terminal pane',
+        label: 'terminal',
+        detail: 'Switch to terminal pane',
+        icon: 'terminal',
         disabled: workspaceActionDisabled,
         disabledReason: workspaceActionDisabledReason,
         action: () => void setPane('terminal'),
       },
       {
+        id: 'action:open-files',
+        label: 'files',
+        detail: 'Switch to files pane',
+        icon: 'folder',
+        action: () => void setPane('files'),
+      },
+      {
         id: 'action:refresh-workspace',
-        label: 'Refresh workspace',
+        label: 'refresh',
         detail: 'Reload files and git diff',
+        icon: 'refresh',
         disabled: !activeSession || Boolean(loadingLabel),
         disabledReason: !activeSession ? sessionRequiredReason : loadingReason,
         action: () => {
@@ -3452,10 +3515,12 @@ export function App() {
           }
         },
       },
+      { divider: true, label: 'Create' },
       {
         id: 'action:new-custom-agent',
-        label: 'New custom agent',
-        detail: 'Open Agents with a clean custom agent draft',
+        label: 'new-agent',
+        detail: 'Create a new custom agent',
+        icon: 'bot',
         action: () => {
           void openPaneSection('agents', 'agents-editor', 'agents')
           startNewAgentDraft()
@@ -3463,8 +3528,9 @@ export function App() {
       },
       {
         id: 'action:new-team',
-        label: 'New team',
-        detail: 'Open Teams with a clean team draft',
+        label: 'new-team',
+        detail: 'Create a new agent team',
+        icon: 'users',
         disabled: workspaceActionDisabled,
         disabledReason: workspaceActionDisabledReason,
         action: () => {
@@ -3474,28 +3540,19 @@ export function App() {
       },
       {
         id: 'action:new-global-task',
-        label: 'New global scheduled task',
-        detail: 'Open Tasks with a clean global task draft',
+        label: 'new-global-task',
+        detail: 'Create a global scheduled task',
+        icon: 'play',
         action: () => {
           void openPaneSection('tasks', 'tasks-global-tasks', 'tasks')
           startNewScheduledTaskDraft()
         },
       },
       {
-        id: 'action:new-project-task',
-        label: 'New project scheduled task',
-        detail: 'Open Tasks with a clean project task draft',
-        disabled: workspaceActionDisabled,
-        disabledReason: workspaceActionDisabledReason,
-        action: () => {
-          void openPaneSection('tasks', 'tasks-project-tasks', 'tasks')
-          startNewProjectScheduledTaskDraft()
-        },
-      },
-      {
         id: 'action:add-mcp',
-        label: 'Add MCP server',
-        detail: 'Open Settings MCP management with a clean draft',
+        label: 'add-mcp',
+        detail: 'Add a new MCP server',
+        icon: 'terminal',
         action: () => {
           openPaneSection('mcp', 'mcp-servers', 'mcp')
           startNewMcpDraft()
@@ -3503,48 +3560,20 @@ export function App() {
       },
       {
         id: 'action:new-user-skill',
-        label: 'New user skill',
-        detail: 'Open Settings Skills with a clean user skill draft',
+        label: 'new-skill',
+        detail: 'Create a new skill',
+        icon: 'bot',
         action: () => {
-          openPaneSection('skills', 'skills-installed', 'skills')
+          openPaneSection('skills', 'skills-create', 'skills')
           startNewUserSkillDraft()
         },
       },
-      {
-        id: 'action:new-project-skill',
-        label: 'New project skill',
-        detail: 'Open Settings Skills with a clean project skill draft',
-        disabled: workspaceActionDisabled,
-        disabledReason: workspaceActionDisabledReason,
-        action: () => {
-          openPaneSection('skills', 'skills-installed', 'skills')
-          startNewProjectSkillDraft()
-        },
-      },
-      {
-        id: 'action:install-user-skill',
-        label: 'Install user skill',
-        detail: 'Choose a local skill folder for the user scope',
-        action: () => {
-          openPaneSection('skills', 'skills-installed', 'skills')
-          void installLocalSkill()
-        },
-      },
-      {
-        id: 'action:install-project-skill',
-        label: 'Install project skill',
-        detail: 'Choose a local skill folder for this workspace',
-        disabled: workspaceActionDisabled,
-        disabledReason: workspaceActionDisabledReason,
-        action: () => {
-          openPaneSection('skills', 'skills-installed', 'skills')
-          void installProjectSkill()
-        },
-      },
+      { divider: true, label: 'Settings' },
       {
         id: 'action:list-plugins',
-        label: 'List plugins',
-        detail: 'Open Settings plugin management and list available plugins',
+        label: 'plugins',
+        detail: 'Open plugin management',
+        icon: 'code',
         action: () => {
           openPaneSection('settings', 'settings-plugins', 'settings')
           void listAvailablePlugins()
@@ -3552,17 +3581,31 @@ export function App() {
       },
       {
         id: 'action:refresh-settings',
-        label: 'Refresh settings',
-        detail: 'Reload Claude Code configuration',
+        label: 'reload-config',
+        detail: 'Reload all configuration',
+        icon: 'refresh',
         action: () => {
           openPaneSection('settings', 'settings-runtime', 'settings')
           void refreshSettingsConfig()
         },
       },
+      {
+        id: 'action:export-diagnostics',
+        label: 'diagnostics',
+        detail: 'Export diagnostic information',
+        icon: 'clipboard',
+        action: () => {
+          openPaneSection('settings', 'settings-runtime', 'settings')
+          void handleDiagnosticsExportClick()
+        },
+      },
     ]
-    return withComposerMenuAvailability([...customCommandItems, ...actions.filter(item =>
-      matches(item.label) || matches(item.id.replace('action:', '')),
-    )].slice(0, 14))
+    return withComposerMenuAvailability([
+      ...customCommandItems.map(item => ({ ...item, group: 'Custom Commands', icon: 'code' as IconName })),
+      ...slashActions.filter(item =>
+        'divider' in item || matches(item.label) || matches(item.detail),
+      ),
+    ].slice(0, 25))
   }, [
     activeFile,
     activeSession,
@@ -4129,7 +4172,7 @@ export function App() {
       return
     }
     const activeItem = composerMenuItems[composerMenuActiveIndex]
-    const firstEnabledIndex = composerMenuItems.findIndex(item => !item.disabled)
+    const firstEnabledIndex = composerMenuItems.findIndex(item => !('divider' in item) && !item.disabled)
     if (firstEnabledIndex >= 0 && activeItem?.disabled) {
       composerMenuActiveIndexRef.current = firstEnabledIndex
       setComposerMenuActiveIndex(firstEnabledIndex)
@@ -4387,7 +4430,9 @@ export function App() {
     if (!items.length) return 0
     for (let offset = 0; offset < items.length; offset += 1) {
       const index = (start + direction * offset + items.length) % items.length
-      if (!items[index]?.disabled) return index
+      const entry = items[index]
+      if (entry && 'divider' in entry) continue
+      if (entry && !entry.disabled) return index
     }
     return Math.max(0, Math.min(start, items.length - 1))
   }
@@ -4438,7 +4483,14 @@ export function App() {
   function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>): void {
     if (currentComposerTrigger && composerMenuItems.length && event.key === 'Enter') {
       event.preventDefault()
-      chooseComposerMenuItem(composerMenuItems[composerMenuActiveIndexRef.current] ?? composerMenuItems[0]!)
+      let selected = composerMenuItems[composerMenuActiveIndexRef.current] ?? composerMenuItems[0]!
+      if (selected && 'divider' in selected) {
+        const nextIdx = enabledComposerMenuIndex(composerMenuActiveIndexRef.current + 1, 1)
+        selected = composerMenuItems[nextIdx] as ComposerMenuItem
+      }
+      if (selected && !('divider' in selected)) {
+        chooseComposerMenuItem(selected)
+      }
       return
     }
     if (currentComposerTrigger && composerMenuItems.length && event.key === 'ArrowDown') {
@@ -10658,7 +10710,12 @@ export function App() {
                   <span>{currentComposerTrigger.kind === '@' ? 'Resources' : 'Actions'}</span>
                   <small>{currentComposerTrigger.kind}{currentComposerTrigger.query}</small>
                 </div>
-                {composerMenuItems.length ? composerMenuItems.map(item => (
+                {composerMenuItems.length ? composerMenuItems.map((item, index) => (
+                  'divider' in item ? (
+                    <div key={`divider-${item.label}-${index}`} className="composer-menu-divider">
+                      <span>{item.label}</span>
+                    </div>
+                  ) : (
                   <button
                     key={item.id}
                     id={composerMenuOptionId(item)}
@@ -10669,9 +10726,11 @@ export function App() {
                     className={composerMenuItems[composerMenuActiveIndex]?.id === item.id ? 'active' : undefined}
                     onMouseDown={event => handleComposerMenuItemMouseDown(event, item)}
                   >
-                    <span>{item.label}</span>
+                    {item.icon && <Icon name={item.icon} />}
+                    <span>{item.label.startsWith('/') || item.label.startsWith('@') ? item.label : currentComposerTrigger.kind === '/' ? `/${item.label}` : item.label}</span>
                     <small>{item.disabled ? `${item.detail} · ${item.disabledReason ?? 'unavailable'}` : item.detail}</small>
                   </button>
+                  )
                 )) : (
                   <div className="composer-menu-empty">
                     <Icon name="search" />
