@@ -1,54 +1,41 @@
-# Synapse Desktop - Claude Code Desktop UI
+# Synapse Desktop - 项目文档
 
-## 项目概述
+[← 返回主 README (English)](../README.md) | [← 返回主 README (中文)](../README.zh-CN.md)
 
-基于 Claude Code CLI 构建的增强型桌面应用，提供完整的可视化管理界面，支持：
-- 多会话聊天和工作区管理
-- Agent/Teams 全生命周期管理
-- MCP 服务器和 Skills 可视化管理
-- 定时任务调度
-- 完整的 JSON-RPC 活动追踪和调试
+---
 
 ## 文档导航
 
-### 需求文档 (`docs/requirements/`)
-- [产品需求文档](./requirements/PRD.md) - 功能需求和用户场景
-- [UI/UX 设计说明](./requirements/UI-UX.md) - 界面设计和交互逻辑
+### 📋 需求文档
 
-### 技术文档 (`docs/technical/`)
-- [架构设计](./architecture/ARCHITECTURE.md) - 系统架构和模块划分
-- [IPC 通信协议](./technical/IPC.md) - 主进程/渲染进程通信规范
-- [RPC 活动追踪](./technical/RPC-TRACING.md) - JSON-RPC 消息捕获实现
+| 文档 | 说明 | 语言 |
+|------|------|------|
+| [产品需求文档 (PRD)](./requirements/PRD.md) | 功能需求列表、用户场景、优先级追踪 | 中文 |
 
-## 快速开始
+### 🏗️ 架构文档
 
-```bash
-# 安装依赖
-bun install
+| 文档 | 说明 | 语言 |
+|------|------|------|
+| [系统架构设计](./architecture/ARCHITECTURE.md) | 整体架构、模块划分、数据流图 | 中文 |
 
-# 开发模式启动
-bun run desktop:dev
+### 🔧 技术文档
 
-# 构建生产版本
-bun run desktop:build
-```
+| 文档 | 说明 | 语言 |
+|------|------|------|
+| [RPC 活动追踪实现](./technical/RPC-TRACING.md) | JSON-RPC 消息捕获机制和UI实现 | 中文 |
 
-## 快捷键
+---
 
-| 快捷键 | 功能 |
-|--------|------|
-| ⌘1 | Chat |
-| ⌘2 | Agents |
-| ⌘3 | Teams |
-| ⌘4 | Tasks |
-| ⌘5 | MCP Servers |
-| ⌘6 | Skills |
-| ⌘7 | Settings |
-| ⌘K | 命令面板 |
+## 快速链接
 
-## 开发规范
+- **GitHub**: https://github.com/wencaiwulue/synapse
+- **Issues**: https://github.com/wencaiwulue/synapse/issues
+- **主 README**: [English](../README.md) | [中文](../README.zh-CN.md)
 
-- 每个功能完成后更新对应文档
-- 提交时间使用周末时间戳
-- 提交信息清晰描述功能变更
-- 提交前确保 TypeScript 编译和构建通过
+## 开发指南
+
+每完成一个功能，请按以下顺序更新：
+1. 更新 `docs/requirements/PRD.md` 中对应功能状态
+2. 如有架构变更，更新架构文档
+3. 如涉及新的技术实现，补充技术文档
+4. 使用 `bun run wcommit "提交信息"` 自动周末时间戳提交推送
