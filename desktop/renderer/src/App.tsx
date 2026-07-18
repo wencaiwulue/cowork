@@ -3345,9 +3345,9 @@ export function App() {
         .slice(0, 6)
         .map(agent => ({
           id: `agent:${agent.source}:${agent.agentType}`,
-          label: agent.agentType,
+          label: `@${agent.agentType}`,
           detail: `Agent · ${agent.source}`,
-          value: `@agent:${agent.agentType}`,
+          value: `@${agent.agentType}`,
           group: 'Agents',
           icon: 'bot' as IconName,
         }))
@@ -3359,9 +3359,9 @@ export function App() {
         .slice(0, 4)
         .map(team => ({
           id: `team:${team.name}`,
-          label: team.name,
+          label: `@${team.name}`,
           detail: `${team.members.length} teammate${team.members.length === 1 ? '' : 's'}`,
-          value: `@team:${team.name}`,
+          value: `@${team.name}`,
           group: 'Teams',
           icon: 'users' as IconName,
         }))
@@ -3390,7 +3390,7 @@ export function App() {
         .slice(0, 4)
         .map(skill => ({
           id: `skill:${scopedResourceKey(skill.scope, skill.name)}`,
-          label: skill.name,
+          label: `@skill:${skill.name}`,
           detail: `Skill · ${skill.scope}`,
           value: `@skill:${skill.name}`,
           group: 'Skills',
@@ -3411,7 +3411,7 @@ export function App() {
         .slice(0, 4)
         .map(server => ({
           id: `mcp:${scopedResourceKey(server.scope, server.name)}`,
-          label: server.name,
+          label: `@mcp:${server.name}`,
           detail: `MCP · ${server.scope}${server.enabled === false ? ' · disabled' : ''}${server.approvalStatus && server.approvalStatus !== 'approved' ? ` · ${server.approvalStatus}` : ''}`,
           value: `@mcp:${server.name}`,
           group: 'MCP Servers',
@@ -4524,7 +4524,7 @@ export function App() {
   }
 
   function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>): void {
-    if (currentComposerTrigger && composerMenuItems.length && event.key === 'Enter') {
+    if (currentComposerTrigger && composerMenuItems.length && (event.key === 'Enter' || event.key === 'Tab')) {
       event.preventDefault()
       let selected = composerMenuItems[composerMenuActiveIndexRef.current] ?? composerMenuItems[0]!
       if (selected && 'divider' in selected) {
@@ -4533,6 +4533,16 @@ export function App() {
       }
       if (selected && !('divider' in selected)) {
         chooseComposerMenuItem(selected)
+      }
+      return
+    }
+    if (currentComposerTrigger && event.key === 'Escape') {
+      event.preventDefault()
+      const textarea = composerTextareaRef.current
+      if (textarea) {
+        const end = textarea.value.length
+        textarea.setSelectionRange(end, end)
+        setComposerCursor(end)
       }
       return
     }
@@ -4747,37 +4757,39 @@ export function App() {
   }
 
 
+  function escapeRegex(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  }
+
   function resolveChatTargetFromInput(text: string): { target: ChatTarget; cleanText: string } {
     let target = chatTarget
     let cleanText = text
-    
-    // Check for @agent:name pattern
-    const agentMatch = text.match(/@agent:([\w-]+)/)
-    if (agentMatch) {
-      const agentName = agentMatch[1]
-      const agentExists = agentList.allAgents.some(a => a.agentType === agentName)
-      if (agentExists) {
-        target = { type: 'agent', teamName: '', agentType: agentName }
-        cleanText = cleanText.replace(agentMatch[0], '').trim()
+
+    for (const agent of agentList.allAgents) {
+      const pattern = new RegExp(`@${escapeRegex(agent.agentType)}\\b`)
+      const match = text.match(pattern)
+      if (match) {
+        target = { type: 'agent', teamName: '', agentType: agent.agentType }
+        cleanText = cleanText.replace(match[0], '').replace(/\s+/g, ' ').trim()
+        break
       }
     }
-    
-    // Check for @team:name pattern
-    const teamMatch = text.match(/@team:([\w-]+)/)
-    if (teamMatch) {
-      const teamName = teamMatch[1]
-      const teamExists = teams.some(t => t.name === teamName)
-      if (teamExists) {
-        target = { type: 'team', teamName, agentType: '' }
-        cleanText = cleanText.replace(teamMatch[0], '').trim()
+
+    if (target.type === 'session') {
+      for (const team of teams) {
+        const pattern = new RegExp(`@${escapeRegex(team.name)}\\b`)
+        const match = text.match(pattern)
+        if (match) {
+          target = { type: 'team', teamName: team.name, agentType: '' }
+          cleanText = cleanText.replace(match[0], '').replace(/\s+/g, ' ').trim()
+          break
+        }
       }
     }
-    
-    // @skill:name and @mcp:name are just contextual references for Claude, leave them in text
-    // @file/path references also stay in the prompt for Claude
-    
+
     return { target, cleanText }
   }
+
 
   async function sendMessage(): Promise<void> {
     if (!activeSession) {
@@ -10795,13 +10807,13 @@ export function App() {
                 role="listbox"
                 aria-label={currentComposerTrigger.kind === '@' ? 'Mention resources' : 'Composer actions'}
                 aria-activedescendant={
-                  composerMenuItems[composerMenuActiveIndex]
-                    ? composerMenuOptionId(composerMenuItems[composerMenuActiveIndex]!)
+                  composerMenuItems[composerMenuActiveIndex] && !('divider' in composerMenuItems[composerMenuActiveIndex]!)
+                    ? composerMenuOptionId(composerMenuItems[composerMenuActiveIndex] as ComposerMenuItem)
                     : undefined
                 }
               >
                 <div className="composer-menu-header">
-                  <span>{currentComposerTrigger.kind === '@' ? 'Resources' : 'Actions'}</span>
+                  <span>{currentComposerTrigger.kind === '@' ? 'Mentions' : 'Commands'}</span>
                   <small>{currentComposerTrigger.kind}{currentComposerTrigger.query}</small>
                 </div>
                 {composerMenuItems.length ? composerMenuItems.map((item, index) => (
@@ -10815,13 +10827,23 @@ export function App() {
                     id={composerMenuOptionId(item)}
                     type="button"
                     role="option"
-                    aria-selected={composerMenuItems[composerMenuActiveIndex]?.id === item.id}
+                    aria-selected={
+                      !('divider' in item) && 
+                      composerMenuItems[composerMenuActiveIndex] && 
+                      !('divider' in composerMenuItems[composerMenuActiveIndex]!) &&
+                      (composerMenuItems[composerMenuActiveIndex] as ComposerMenuItem).id === item.id ? 'true' : undefined
+                    }
                     aria-disabled={item.disabled ? 'true' : undefined}
-                    className={composerMenuItems[composerMenuActiveIndex]?.id === item.id ? 'active' : undefined}
+                    className={
+                      !('divider' in item) && 
+                      composerMenuItems[composerMenuActiveIndex] && 
+                      !('divider' in composerMenuItems[composerMenuActiveIndex]!) &&
+                      (composerMenuItems[composerMenuActiveIndex] as ComposerMenuItem).id === item.id ? 'active' : undefined
+                    }
                     onMouseDown={event => handleComposerMenuItemMouseDown(event, item)}
                   >
                     {item.icon && <Icon name={item.icon} />}
-                    <span>{item.label.startsWith('/') || item.label.startsWith('@') ? item.label : currentComposerTrigger.kind === '/' ? `/${item.label}` : item.label}</span>
+                    <span>{item.label}</span>
                     <small>{item.disabled ? `${item.detail} · ${item.disabledReason ?? 'unavailable'}` : item.detail}</small>
                   </button>
                   )
@@ -10840,8 +10862,8 @@ export function App() {
               aria-controls={currentComposerTrigger ? 'composer-menu-listbox' : undefined}
               aria-expanded={Boolean(currentComposerTrigger && (currentComposerTrigger.kind === '/' || activeSession))}
               aria-activedescendant={
-                composerMenuItems[composerMenuActiveIndex]
-                  ? composerMenuOptionId(composerMenuItems[composerMenuActiveIndex]!)
+                composerMenuItems[composerMenuActiveIndex] && !('divider' in composerMenuItems[composerMenuActiveIndex]!)
+                  ? composerMenuOptionId(composerMenuItems[composerMenuActiveIndex] as ComposerMenuItem)
                   : undefined
               }
               onChange={handleComposerInputChange}
