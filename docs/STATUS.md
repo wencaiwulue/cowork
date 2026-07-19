@@ -48,6 +48,11 @@
 - [x] @ 分组提及菜单（Agents/Teams/Files/Skills/MCP）
 - [x] @自动路由到agent/team发送
 - [x] / 斜杠命令分组（Prompt/Navigation/Create/Settings）
+- [x] **实时@提及检测和可视化chips**：输入时实时解析所有@mentions并显示彩色标签
+- [x] **自动同步chatTarget下拉**：检测到@agent/@team时自动更新发送目标选择器
+- [x] **/@skill和@mcp正确处理**：提及skill/mcp/file时从文本中剥离并添加上下文标注
+- [x] **/ 命令自动发送**：Prompt组斜杠命令（/review-diff, /fix-bugs等）选择后自动发送
+- [x] **路由可视化**：chips区域显示消息将路由到哪个Agent/Team
 - [x] Tab/Enter确认，Esc关闭
 - [x] Prompt命令展开为完整提示词
 - [x] Action命令直接执行

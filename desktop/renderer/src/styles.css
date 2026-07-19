@@ -3338,3 +3338,67 @@ button:focus-visible {
   margin: 0 0 8px;
   font-size: 14px;
 }
+
+/* Composer mention chips */
+.composer-mentions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 0;
+  align-items: center;
+}
+
+.mention-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.mention-chip svg {
+  width: 12px;
+  height: 12px;
+}
+
+.mention-agent {
+  background: color-mix(in srgb, #4ade80 15%, transparent);
+  color: #4ade80;
+  border-color: color-mix(in srgb, #4ade80 25%, transparent);
+}
+
+.mention-team {
+  background: color-mix(in srgb, #60a5fa 15%, transparent);
+  color: #60a5fa;
+  border-color: color-mix(in srgb, #60a5fa 25%, transparent);
+}
+
+.mention-file {
+  background: color-mix(in srgb, #fbbf24 15%, transparent);
+  color: #fbbf24;
+  border-color: color-mix(in srgb, #fbbf24 25%, transparent);
+}
+
+.mention-skill {
+  background: color-mix(in srgb, #c084fc 15%, transparent);
+  color: #c084fc;
+  border-color: color-mix(in srgb, #c084fc 25%, transparent);
+}
+
+.mention-mcp {
+  background: color-mix(in srgb, #f472b6 15%, transparent);
+  color: #f472b6;
+  border-color: color-mix(in srgb, #f472b6 25%, transparent);
+}
+
+.mention-routing {
+  font-size: 12px;
+  color: var(--text-muted, var(--text));
+  opacity: 0.7;
+  margin-left: 4px;
+}

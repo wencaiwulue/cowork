@@ -258,6 +258,13 @@ type ChatTarget = {
   teamName: string
   agentType: string
 }
+type ParsedMention = {
+  kind: 'agent' | 'team' | 'file' | 'skill' | 'mcp'
+  value: string
+  label: string
+  raw: string
+  index: number
+}
 type ComposerMenuItem = {
   id: string
   label: string
@@ -3316,6 +3323,73 @@ export function App() {
     () => composerTrigger(input, composerCursor) ?? composerTrigger(input, input.length),
     [composerCursor, input],
   )
+  const parsedMentions = useMemo<ParsedMention[]>(() => {
+    if (!input.trim() || !activeSession) return []
+    const mentions: ParsedMention[] = []
+    // Match @agent, @team, @skill:name, @mcp:name, @filepath
+    const mentionRegex = /@(skill:[\w-]+|mcp:[\w-]+|[^\s@]+)/g
+    let match
+    while ((match = mentionRegex.exec(input)) !== null) {
+      const raw = match[0]
+      const val = match[1] ?? ''
+      if (val.startsWith('skill:')) {
+        const name = val.slice(6)
+        const skill = [
+          ...(desktopConfig?.skills ?? []),
+          ...projectSkills,
+        ].find(s => s.name === name)
+        if (skill) mentions.push({ kind: 'skill', value: name, label: `skill:${name}`, raw, index: match.index })
+      } else if (val.startsWith('mcp:')) {
+        const name = val.slice(4)
+        const server = [
+          ...(desktopConfig?.mcpServers ?? []),
+          ...projectMcpServers,
+        ].find(s => s.name === name)
+        if (server) mentions.push({ kind: 'mcp', value: name, label: `mcp:${name}`, raw, index: match.index })
+      } else {
+        // Check agents first
+        const agent = agentList.allAgents.find(a => a.agentType === val)
+        if (agent) {
+          mentions.push({ kind: 'agent', value: agent.agentType, label: agent.agentType, raw, index: match.index })
+          continue
+        }
+        // Check teams
+        const team = teams.find(t => t.name === val)
+        if (team) {
+          mentions.push({ kind: 'team', value: team.name, label: team.name, raw, index: match.index })
+          continue
+        }
+        // Check files - match full path or suffix
+        if (val.includes('/') || val.includes('.')) {
+          const file = flatTree.find(e => e.type === 'file' && (e.path === val || e.path.endsWith('/' + val)))
+          if (file) {
+            mentions.push({ kind: 'file', value: file.path, label: file.path.split('/').pop() ?? file.path, raw, index: match.index })
+          } else if (val.includes('.')) {
+            // Has dot extension - likely a file reference even if not found in tree
+            mentions.push({ kind: 'file', value: val, label: val.split('/').pop() ?? val, raw, index: match.index })
+          }
+        }
+      }
+    }
+    return mentions
+  }, [input, activeSession, agentList.allAgents, teams, flatTree, desktopConfig?.skills, desktopConfig?.mcpServers, projectSkills, projectMcpServers])
+  // Sync chatTarget with live @mentions in input
+  useEffect(() => {
+    const agentMention = parsedMentions.find(m => m.kind === 'agent')
+    const teamMention = parsedMentions.find(m => m.kind === 'team')
+    setChatTarget(prev => {
+      if (agentMention && prev.type !== 'agent') {
+        return { type: 'agent' as const, teamName: '', agentType: agentMention.value }
+      }
+      if (teamMention && prev.type !== 'team') {
+        return { type: 'team' as const, teamName: teamMention.value, agentType: '' }
+      }
+      if (!agentMention && !teamMention && prev.type !== 'session') {
+        return { type: 'session' as const, teamName: '', agentType: '' }
+      }
+      return prev
+    })
+  }, [parsedMentions])
   const composerMenuItems = useMemo<ComposerMenuEntry[]>(() => {
     if (!currentComposerTrigger) return []
     const query = normalizeMenuFilter(currentComposerTrigger.query)
@@ -4481,20 +4555,26 @@ export function App() {
     if (trigger.kind === '/') {
       const promptText = item.value?.startsWith('/') ? slashPrompt(item.value) : item.value
       if (promptText) {
-        // Insert the generated prompt
+        // Insert the generated prompt and auto-send
         const result = applyComposerMenuValue({ input, cursor: composerCursor, value: promptText })
         setInput(result.input)
         setComposerCursor(result.cursor)
+        // Auto-send after slash command prompt is inserted
         window.requestAnimationFrame(() => {
           const textarea = composerTextareaRef.current
-          if (!textarea) return
-          textarea.focus()
-          textarea.setSelectionRange(result.cursor, result.cursor)
+          if (textarea) {
+            textarea.blur()
+          }
+          // Trigger send after state update
+          setTimeout(() => {
+            void sendMessage()
+          }, 50)
         })
       } else {
         // Empty value means navigation action, clear the /
         setInput(value => value.slice(0, trigger.start) + value.slice(trigger.end))
         setComposerCursor(trigger.start)
+        window.requestAnimationFrame(() => composerTextareaRef.current?.focus())
       }
       return
     }
@@ -4761,33 +4841,45 @@ export function App() {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   }
 
-  function resolveChatTargetFromInput(text: string): { target: ChatTarget; cleanText: string } {
+  function resolveChatTargetFromInput(text: string): { target: ChatTarget; cleanText: string; contextMentions: ParsedMention[] } {
     let target = chatTarget
     let cleanText = text
+    const contextMentions: ParsedMention[] = []
 
-    for (const agent of agentList.allAgents) {
-      const pattern = new RegExp(`@${escapeRegex(agent.agentType)}\\b`)
-      const match = text.match(pattern)
-      if (match) {
-        target = { type: 'agent', teamName: '', agentType: agent.agentType }
-        cleanText = cleanText.replace(match[0], '').replace(/\s+/g, ' ').trim()
-        break
-      }
-    }
+    // Use parsed mentions from current input
+    const mentions = parsedMentions
 
-    if (target.type === 'session') {
-      for (const team of teams) {
-        const pattern = new RegExp(`@${escapeRegex(team.name)}\\b`)
-        const match = text.match(pattern)
-        if (match) {
-          target = { type: 'team', teamName: team.name, agentType: '' }
-          cleanText = cleanText.replace(match[0], '').replace(/\s+/g, ' ').trim()
+    for (const mention of mentions) {
+      const pattern = new RegExp(escapeRegex(mention.raw) + '(?=\\s|$)')
+      switch (mention.kind) {
+        case 'agent':
+          if (target.type === 'session') {
+            target = { type: 'agent', teamName: '', agentType: mention.value }
+          }
+          cleanText = cleanText.replace(pattern, '').replace(/\s+/g, ' ').trim()
           break
-        }
+        case 'team':
+          if (target.type === 'session') {
+            target = { type: 'team', teamName: mention.value, agentType: '' }
+          }
+          cleanText = cleanText.replace(pattern, '').replace(/\s+/g, ' ').trim()
+          break
+        case 'file':
+          contextMentions.push(mention)
+          cleanText = cleanText.replace(pattern, '').replace(/\s+/g, ' ').trim()
+          break
+        case 'skill':
+          contextMentions.push(mention)
+          cleanText = cleanText.replace(pattern, '').replace(/\s+/g, ' ').trim()
+          break
+        case 'mcp':
+          contextMentions.push(mention)
+          cleanText = cleanText.replace(pattern, '').replace(/\s+/g, ' ').trim()
+          break
       }
     }
 
-    return { target, cleanText }
+    return { target, cleanText, contextMentions }
   }
 
 
@@ -4825,8 +4917,24 @@ export function App() {
     const session = activeSession
     sendActionPendingRef.current = true
     const rawText = input.trim()
-    const { target: resolvedTarget, cleanText } = resolveChatTargetFromInput(rawText)
-    const text = cleanText
+    const { target: resolvedTarget, cleanText, contextMentions } = resolveChatTargetFromInput(rawText)
+    // Build enriched text with context mentions
+    let text = cleanText
+    if (contextMentions.length > 0) {
+      const contextParts: string[] = []
+      for (const cm of contextMentions) {
+        if (cm.kind === 'file') {
+          contextParts.push(`[Referenced file: ${cm.value}]`)
+        } else if (cm.kind === 'skill') {
+          contextParts.push(`[Using skill: ${cm.value}]`)
+        } else if (cm.kind === 'mcp') {
+          contextParts.push(`[Using MCP server: ${cm.value}]`)
+        }
+      }
+      if (contextParts.length > 0) {
+        text = contextParts.join('\n') + (text ? '\n\n' + text : '')
+      }
+    }
     setInput('')
     setComposerCursor(0)
     setConversationNotice(undefined)
@@ -10800,6 +10908,27 @@ export function App() {
                 </select>
               )}
             </div>
+            {parsedMentions.length > 0 && !currentComposerTrigger && (
+              <div className="composer-mentions" aria-label="Detected mentions">
+                {parsedMentions.map((m, i) => (
+                  <span key={`${m.kind}-${m.value}-${i}`} className={`mention-chip mention-${m.kind}`}>
+                    <Icon name={m.kind === 'agent' ? 'bot' : m.kind === 'team' ? 'users' : m.kind === 'file' ? 'file' : m.kind === 'skill' ? 'code' : 'terminal'} />
+                    {m.label}
+                  </span>
+                ))}
+                {(() => {
+                  const agentMention = parsedMentions.find(m => m.kind === 'agent')
+                  const teamMention = parsedMentions.find(m => m.kind === 'team')
+                  if (agentMention) {
+                    return <span className="mention-routing">→ Agent: {agentMention.value}</span>
+                  }
+                  if (teamMention) {
+                    return <span className="mention-routing">→ Team: {teamMention.value}</span>
+                  }
+                  return null
+                })()}
+              </div>
+            )}
             {currentComposerTrigger && (currentComposerTrigger.kind === '/' || activeSession) && (
               <div
                 id="composer-menu-listbox"
