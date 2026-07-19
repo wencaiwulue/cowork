@@ -3531,6 +3531,15 @@ export function App() {
         value: '/explain-file',
       },
       {
+        id: 'action:write-tests',
+        label: 'write-tests',
+        detail: 'Write tests for the current file or selected code',
+        icon: 'play',
+        disabled: workspaceActionDisabled,
+        disabledReason: workspaceActionDisabledReason,
+        value: '/write-tests',
+      },
+      {
         id: 'action:run-tests',
         label: 'run-tests',
         detail: 'Run the project test suite',
@@ -3556,6 +3565,24 @@ export function App() {
         disabled: workspaceActionDisabled,
         disabledReason: workspaceActionDisabledReason,
         value: '/refactor',
+      },
+      {
+        id: 'action:document',
+        label: 'document',
+        detail: 'Add or update documentation for the current code',
+        icon: 'file',
+        disabled: workspaceActionDisabled,
+        disabledReason: workspaceActionDisabledReason,
+        value: '/document',
+      },
+      {
+        id: 'action:plan',
+        label: 'plan',
+        detail: 'Create an implementation plan before making changes',
+        icon: 'code',
+        disabled: workspaceActionDisabled,
+        disabledReason: workspaceActionDisabledReason,
+        value: '/plan',
       },
       { divider: true, label: 'Navigation' },
       {
@@ -4495,6 +4522,12 @@ export function App() {
         return 'Please analyze the codebase for bugs. Look for: logic errors, edge cases not handled, null/undefined issues, race conditions, and resource leaks. Fix confirmed bugs and explain each fix.'
       case '/refactor':
         return 'Please refactor the selected or referenced code to improve clarity, reduce duplication, and follow best practices. Do not change behavior unless fixing a clear bug. Explain the refactoring decisions.'
+      case '/write-tests':
+        return 'Please write comprehensive tests for the current file or selected code. Cover happy paths, edge cases, and error conditions. Follow existing test patterns in the codebase. Run the tests to verify they pass.'
+      case '/document':
+        return 'Please add or update documentation for the current code. Include: function/class purpose, parameter descriptions, return values, usage examples where helpful, and any important notes about behavior or limitations. Follow existing documentation style.'
+      case '/plan':
+        return 'Please analyze the current codebase or requested change and create a step-by-step implementation plan. Break the work into small, verifiable steps. For each step, describe what will change, what files are affected, and how to verify it works. Present the plan before making changes.'
       case '/terminal':
         return ''
       case '/files':

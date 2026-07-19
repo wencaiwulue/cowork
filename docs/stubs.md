@@ -69,3 +69,37 @@ CLAUDE_CODE_ENABLE_CFC=1 bun run build
 that TypeScript checking is not clean because the source snapshot lacks
 generated/type-only files and does not exactly match the original dependency
 set.
+
+## 2026-07-24 Stub Audit (Quickstarts Reference)
+
+Audited against [anthropics/claude-quickstarts](https://github.com/anthropics/claude-quickstarts):
+
+### Stub Completeness
+- All 4 npm stubs (`@ant/claude-for-chrome-mcp`, `@ant/computer-use-input`, `@ant/computer-use-mcp`, `@ant/computer-use-swift`) are fully implemented
+- `ant-computer-use-swift/index.js` exports `{}` (type-only compatibility stub, Swift binary loads at runtime)
+- All 65 IPC channels have handlers in `desktop/main/main.ts`
+- All 81 `handleIpc()` registrations are accounted for
+- All npm dependencies (playwright, @nut-tree-fork/nut-js, screenshot-desktop, clipboardy, @modelcontextprotocol/sdk) are installed
+
+### Quickstarts Patterns Covered
+The quickstarts demonstrate Python-side Agent class, MCP connections, and tool execution. All these patterns are handled by the underlying Claude Code CLI SDK:
+
+| Quickstart Pattern | Desktop Coverage |
+|---|---|
+| Agent class with tools | Built-in agent templates (10 types) + @mention routing |
+| MCP server connections | MCP management page (user/project scope) |
+| Browser automation | Chrome MCP stub (Playwright-backed) |
+| Computer use | Local Computer Use MCP stub (nut-js backed) |
+| Autonomous coding loop | Core CLI session with streaming |
+| Tool execution | CLI handles tool calls; desktop shows RPC viewer |
+| Message history | Session transcript and persistence |
+
+### Built-in Agent Templates (added 2026-07-24)
+Inspired by quickstart examples:
+- `code-reviewer` — code review for correctness/bugs/security
+- `test-writer` — writes comprehensive tests with edge cases
+- `bug-finder` — systematically finds and fixes bugs
+- `refactor` — improves code clarity without behavior changes
+- `document-writer` — creates/updates technical documentation
+- `browser-agent` — browser automation tasks
+- `computer-agent` — desktop automation tasks

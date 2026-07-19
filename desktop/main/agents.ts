@@ -30,6 +30,48 @@ const builtInAgents: AgentInfo[] = [
     editable: false,
   },
   {
+    agentType: 'code-reviewer',
+    source: 'built-in',
+    whenToUse: 'Reviews code changes for correctness, bugs, security issues, and best practices.',
+    editable: false,
+  },
+  {
+    agentType: 'test-writer',
+    source: 'built-in',
+    whenToUse: 'Writes comprehensive tests for existing code, covering edge cases and error paths.',
+    editable: false,
+  },
+  {
+    agentType: 'bug-finder',
+    source: 'built-in',
+    whenToUse: 'Systematically finds and fixes bugs in the codebase including logic errors and edge cases.',
+    editable: false,
+  },
+  {
+    agentType: 'refactor',
+    source: 'built-in',
+    whenToUse: 'Refactors code to improve clarity, reduce duplication, and follow best practices without changing behavior.',
+    editable: false,
+  },
+  {
+    agentType: 'document-writer',
+    source: 'built-in',
+    whenToUse: 'Creates and updates technical documentation, READMEs, API docs, and inline comments.',
+    editable: false,
+  },
+  {
+    agentType: 'browser-agent',
+    source: 'built-in',
+    whenToUse: 'Automates browser interactions for web testing, scraping, and UI verification.',
+    editable: false,
+  },
+  {
+    agentType: 'computer-agent',
+    source: 'built-in',
+    whenToUse: 'Performs desktop automation tasks including mouse, keyboard, screenshots, and clipboard operations.',
+    editable: false,
+  },
+  {
     agentType: 'statusline-setup',
     source: 'built-in',
     whenToUse: 'Sets up statusline configuration.',

@@ -22,6 +22,7 @@
 
 ### Agents & Teams
 - [x] Agent目录浏览（built-in/user/project/local/managed/flag/plugin）
+- [x] **10个内置Agent模板**：general-purpose, code-reviewer, test-writer, bug-finder, refactor, document-writer, browser-agent, computer-agent等
 - [x] 自定义Agent创建/编辑/删除
 - [x] Agent诊断（readiness检查）
 - [x] Agent任务启动/停止/输出预览
@@ -51,8 +52,9 @@
 - [x] **实时@提及检测和可视化chips**：输入时实时解析所有@mentions并显示彩色标签
 - [x] **自动同步chatTarget下拉**：检测到@agent/@team时自动更新发送目标选择器
 - [x] **/@skill和@mcp正确处理**：提及skill/mcp/file时从文本中剥离并添加上下文标注
-- [x] **/ 命令自动发送**：Prompt组斜杠命令（/review-diff, /fix-bugs等）选择后自动发送
+- [x] **/ 命令自动发送**：Prompt组斜杠命令选择后自动发送
 - [x] **路由可视化**：chips区域显示消息将路由到哪个Agent/Team
+- [x] **8个Prompt斜杠命令**：/review-diff, /explain-file, /write-tests, /run-tests, /fix-bugs, /refactor, /document, /plan
 - [x] Tab/Enter确认，Esc关闭
 - [x] Prompt命令展开为完整提示词
 - [x] Action命令直接执行
@@ -125,3 +127,17 @@ Claude Quickstarts仓库包含以下参考实现模式：
 - [ ] 插件市场UI
 - [ ] MCP服务器市场浏览
 
+
+---
+
+## Stub Audit (2026-07-24)
+
+参考 [anthropics/claude-quickstarts](https://github.com/anthropics/claude-quickstarts) 完成审计：
+
+### 已验证完成项
+- [x] 所有4个npm stubs全部实现（chrome-mcp, computer-use-mcp, computer-use-input, computer-use-swift）
+- [x] 全部65个IPC channel都有handler实现
+- [x] 所有依赖已安装（playwright, nut-js, screenshot-desktop, clipboardy）
+- [x] quickstarts中的Agent/MCP/Browser/Computer Use模式全部由CLI SDK层提供
+- [x] 新增7个内置Agent模板（code-reviewer, test-writer, bug-finder, refactor, document-writer, browser-agent, computer-agent）
+- [x] 新增3个Prompt斜杠命令（/write-tests, /document, /plan）
