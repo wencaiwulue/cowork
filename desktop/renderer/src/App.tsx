@@ -12455,7 +12455,7 @@ export function App() {
                       Skill content is managed via SKILL.md file. After creation, edit the SKILL.md directly.
                     </div>
                     <div className="section-actions">
-                      <button className="tool-button" onClick={handleSkillSaveClick} disabled={!canSaveSkillDraft || !!loadingLabel}>
+                      <button className="tool-button" onClick={handleSkillSaveClick} disabled={!canSaveSkillDraft(skillDraft, Boolean(activeSession)) || !!loadingLabel}>
                         <Icon name="plus" />Create skill
                       </button>
                       <button className="tool-button" onClick={() => void installLocalSkill()} disabled={skillDraft?.scope === 'project' && !activeSession || !!loadingLabel}>

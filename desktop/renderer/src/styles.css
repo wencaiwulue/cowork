@@ -3302,3 +3302,39 @@ button:focus-visible {
     border-color: rgba(255, 255, 255, 0.1);
   }
 }
+
+.skill-contents-row {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.skill-contents-textarea {
+  width: 100%;
+  min-height: 280px;
+  padding: 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  resize: vertical;
+  color: var(--text);
+}
+
+.skill-contents-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.skill-detail-view {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--hairline);
+}
+
+.skill-detail-view h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
