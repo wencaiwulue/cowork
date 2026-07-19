@@ -12320,10 +12320,22 @@ export function App() {
                       </div>
                     )}
                   </div>
-                  {mcpHealthOutput && (
-                    <div className="settings-section" id="mcp-health">
-                      <h3>MCP Health Check</h3>
-                      <pre className="health-output">{mcpHealthOutput.output}</pre>
+                </section>
+                <section className="settings-section" id="mcp-health">
+                  <h3>MCP Health Check</h3>
+                  <p className="section-copy">Verify connectivity and tool listing for all configured MCP servers.</p>
+                  <div className="section-actions">
+                    <button className="tool-button" onClick={() => void checkMcpHealth()} disabled={!!loadingLabel}>
+                      <Icon name="refresh" />Run health check
+                    </button>
+                  </div>
+                  {mcpHealthOutput ? (
+                    <pre className="health-output">{mcpHealthOutput.output}</pre>
+                  ) : (
+                    <div className="workarea-empty settings-empty-state">
+                      <Icon name="terminal" />
+                      <strong>No health check run yet</strong>
+                      <span>Click "Run health check" to verify all configured MCP servers.</span>
                     </div>
                   )}
                 </section>

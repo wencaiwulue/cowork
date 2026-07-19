@@ -32,8 +32,10 @@
 - [x] MCP服务器独立页面（用户/项目scope）
 - [x] MCP增删改、健康检查
 - [x] MCP项目服务器审批流程
+- [x] MCP健康检查独立section（Servers/Health Check双tab）
 - [x] Skills独立页面（已安装列表）
-- [x] **Skills创建/编辑器（SKILL.md完整textarea）** ← 本次完成
+- [x] **Skills创建/编辑器（SKILL.md完整textarea）**
+- [x] Skill详情查看和"Edit in form"跳转
 - [x] 本地Skill安装
 - [x] Skill详情查看/编辑
 
