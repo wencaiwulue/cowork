@@ -1141,30 +1141,83 @@ function extractRpcMessageInfo(raw: unknown): RpcMessage['parsed'] {
   
   const type = typeof msg.type === 'string' ? msg.type : undefined
   result.messageType = type
-  
-  // Tool use detection
-  const event = msg.event as Record<string, unknown> | undefined
-  const contentBlock = event?.content_block as Record<string, unknown> | undefined
-  if (type === 'stream_event' && event?.type === 'content_block_start') {
-    if (contentBlock?.type === 'tool_use' || contentBlock?.type === 'server_tool_use' || contentBlock?.type === 'mcp_tool_use') {
-      result.isToolUse = true
-      result.toolName = typeof contentBlock.name === 'string' ? contentBlock.name : undefined
+  const subtype = typeof msg.subtype === 'string' ? msg.subtype : undefined
+  if (subtype) result.content = subtype
+
+  // Stream events: content_block_start/stop/delta, message_start/stop/delta
+  if (type === 'stream_event') {
+    const event = msg.event as Record<string, unknown> | undefined
+    const eventType = typeof event?.type === 'string' ? event.type : undefined
+    const contentBlock = event?.content_block as Record<string, unknown> | undefined
+    const delta = event?.delta as Record<string, unknown> | undefined
+
+    if (eventType === 'content_block_start') {
+      const blockType = contentBlock?.type
+      if (blockType === 'tool_use' || blockType === 'server_tool_use' || blockType === 'mcp_tool_use') {
+        result.isToolUse = true
+        result.toolName = typeof contentBlock.name === 'string' ? contentBlock.name : 'unknown_tool'
+        result.content = `Starting tool: ${result.toolName}`
+      } else if (blockType === 'text') {
+        result.content = 'Text block started'
+      } else if (blockType === 'thinking') {
+        result.thinking = ''
+        result.content = '[thinking started]'
+      }
+    } else if (eventType === 'content_block_delta') {
+      if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
+        result.content = delta.text
+      } else if (delta?.type === 'input_json_delta') {
+        result.isToolUse = true
+        result.content = '...'
+      } else if (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+        result.thinking = delta.thinking
+        result.content = '[thinking]'
+      }
+    } else if (eventType === 'content_block_stop') {
+      const index = typeof event.index === 'number' ? event.index : undefined
+      result.content = `Block stopped (index: ${index ?? '?'})`
+    } else if (eventType === 'message_delta') {
+      const stopReason = delta?.stop_reason
+      if (stopReason) result.content = `Message stop reason: ${stopReason}`
+    } else if (eventType === 'message_stop') {
+      result.content = 'Message complete'
     }
   }
   
-  // Tool result detection
-  if (type === 'stream_event' && event?.type === 'content_block_delta') {
-    const delta = event.delta as Record<string, unknown> | undefined
-    if (delta?.type === 'input_json_delta') {
-      result.isToolUse = true
-    }
-  }
-  
+  // System/init messages
   if (type === 'system' || type === 'system_init') {
     result.content = typeof msg.message === 'string' ? msg.message : JSON.stringify(msg.message)
   }
+
+  // Permission requests
+  if (type === 'permission_request') {
+    const request = msg.request as Record<string, unknown> | undefined
+    const toolName = typeof request?.tool_name === 'string' ? request.tool_name : undefined
+    result.isToolUse = !!toolName
+    result.toolName = toolName
+    result.content = `Permission: ${request?.description ?? toolName ?? JSON.stringify(request)}`
+  }
+
+  // Agent task updates
+  if (type === 'agent_task_update') {
+    const update = msg.update as Record<string, unknown> | undefined
+    const taskStatus = typeof update?.status === 'string' ? update.status : undefined
+    const taskId = typeof update?.id === 'string' ? update.id : 'unknown'
+    const agentType = typeof update?.agentType === 'string' ? update.agentType : undefined
+    result.content = `Agent task ${taskId.slice(0,8)} ${taskStatus ?? 'update'}${agentType ? ` (${agentType})` : ''}`
+    if (update?.lastToolName) {
+      result.isToolUse = true
+      result.toolName = update.lastToolName as string
+    }
+  }
+
+  // Tool result
+  if (type === 'tool_result') {
+    result.isToolUse = true
+    result.content = typeof msg.result === 'string' ? msg.result.slice(0, 200) : 'tool result received'
+  }
   
-  // Extract assistant/tool message text
+  // Extract assistant/tool/user message content
   if (type === 'assistant' || type === 'user' || type === 'tool') {
     const message = msg.message as Record<string, unknown> | undefined
     if (message?.content) {
@@ -1183,6 +1236,10 @@ function extractRpcMessageInfo(raw: unknown): RpcMessage['parsed'] {
               result.toolName = typeof c.name === 'string' ? c.name : result.toolName
               return `[tool: ${c.name ?? 'unknown'}]`
             }
+            if (c.type === 'tool_result') {
+              result.isToolUse = true
+              return `[tool result]`
+            }
             return ''
           })
           .filter(Boolean)
@@ -1193,8 +1250,25 @@ function extractRpcMessageInfo(raw: unknown): RpcMessage['parsed'] {
       result.content = msg.result
     }
   }
+
+  // Final result
+  if (type === 'result') {
+    result.content = typeof msg.result === 'string' ? msg.result.slice(0, 500) : JSON.stringify(msg.result).slice(0, 500)
+  }
   
   return result
+}
+
+
+function recordOutgoingRpcMessage(
+  sessionId: string | undefined,
+  type: string,
+  raw: unknown,
+  parsed?: RpcMessage['parsed'],
+): void {
+  if (!sessionId) return
+  const msgEvent = new CustomEvent('rpc-outgoing', { detail: { sessionId, type, raw, parsed } })
+  window.dispatchEvent(msgEvent)
 }
 
 function emptyMcpDraft(): McpDraft {
@@ -1556,7 +1630,25 @@ export function App() {
   const [rpcMessages, setRpcMessages] = useState<RpcMessage[]>([])
   const [rpcMessageFilter, setRpcMessageFilter] = useState<'all' | 'tool' | 'message' | 'system'>('all')
   const [selectedRpcMessage, setSelectedRpcMessage] = useState<RpcMessage>()
+  const [rpcAutoScroll, setRpcAutoScroll] = useState(true)
+  const rpcTimelineRef = useRef<HTMLDivElement>(null)
   const rpcMessageIdRef = useRef(0)
+
+  function copySelectedRpcJson(): void {
+    if (!selectedRpcMessage) return
+    void navigator.clipboard.writeText(JSON.stringify(selectedRpcMessage.raw, null, 2))
+  }
+
+  function exportAllRpcMessages(): void {
+    const data = JSON.stringify(rpcMessages, null, 2)
+    const blob = new Blob([data], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `rpc-activity-${new Date().toISOString().slice(0,19)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
   const [desktopConfig, setDesktopConfig] = useState<ClaudeDesktopConfig>()
   const desktopConfigRef = useRef<ClaudeDesktopConfig | undefined>(undefined)
   const [projectTasks, setProjectTasks] = useState<ProjectScheduledTaskInfo[]>([])
@@ -4589,6 +4681,7 @@ export function App() {
     try {
       await runAction('Sending message', async () => {
         if (chatTarget.type === 'team') {
+          recordOutgoingRpcMessage(session.id, 'team:send', { teamName: chatTarget.teamName, message: text })
           await window.claudeDesktop.teams.send(session.id, {
             teamName: chatTarget.teamName,
             to: '*',
@@ -4602,6 +4695,7 @@ export function App() {
           return
         }
         if (chatTarget.type === 'agent') {
+          recordOutgoingRpcMessage(session.id, 'agent:launch', { agentType: chatTarget.agentType, prompt: text })
           await window.claudeDesktop.sessions.launchAgentTask(session.id, {
             agentType: chatTarget.agentType,
             description: `Chat with ${chatTarget.agentType}`,
@@ -4615,6 +4709,7 @@ export function App() {
           })
           return
         }
+        recordOutgoingRpcMessage(session.id, 'user:send', { text })
         await window.claudeDesktop.sessions.send(session.id, text)
       })
     } finally {
@@ -5504,6 +5599,36 @@ export function App() {
     }
     selectWorkspacePane(event.pane)
   }, [pendingDesktopNavigation])
+
+
+  useEffect(() => {
+    if (!rpcAutoScroll || !rpcTimelineRef.current) return
+    const el = rpcTimelineRef.current
+    el.scrollTop = el.scrollHeight
+  }, [rpcMessages, rpcAutoScroll])
+
+  useEffect(() => {
+    function handleOutgoing(event: Event): void {
+      const detail = (event as CustomEvent).detail as { sessionId: string; type: string; raw: unknown; parsed?: RpcMessage['parsed'] }
+      rpcMessageIdRef.current += 1
+      const rpcMessage: RpcMessage = {
+        id: `rpc-out-${rpcMessageIdRef.current}-${Date.now().toString(36)}`,
+        sessionId: detail.sessionId,
+        timestamp: Date.now(),
+        direction: 'outgoing',
+        type: detail.type,
+        raw: detail.raw,
+        parsed: detail.parsed,
+      }
+      setRpcMessages(prev => {
+        const next = [...prev, rpcMessage]
+        if (next.length > 2000) return next.slice(-1500)
+        return next
+      })
+    }
+    window.addEventListener('rpc-outgoing', handleOutgoing as EventListener)
+    return () => window.removeEventListener('rpc-outgoing', handleOutgoing as EventListener)
+  }, [])
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
@@ -11430,6 +11555,30 @@ export function App() {
                             System
                           </button>
                         </div>
+                        <label className="autoscroll-toggle">
+                          <input
+                            type="checkbox"
+                            checked={rpcAutoScroll}
+                            onChange={e => setRpcAutoScroll(e.target.checked)}
+                          />
+                          Auto-scroll
+                        </label>
+                        <button 
+                          className="tool-button" 
+                          onClick={copySelectedRpcJson}
+                          disabled={!selectedRpcMessage}
+                          title="Copy raw JSON to clipboard"
+                        >
+                          <Icon name="clipboard" />Copy
+                        </button>
+                        <button 
+                          className="tool-button" 
+                          onClick={exportAllRpcMessages}
+                          disabled={rpcMessages.length === 0}
+                          title="Export all messages as JSON"
+                        >
+                          <Icon name="save" />Export
+                        </button>
                         <button 
                           className="tool-button" 
                           onClick={() => { setRpcMessages([]); setSelectedRpcMessage(undefined) }}
@@ -11439,7 +11588,7 @@ export function App() {
                         </button>
                       </div>
                       <div className="activity-layout">
-                        <div className="activity-timeline" role="log" aria-label="RPC message timeline">
+                        <div className="activity-timeline" ref={rpcTimelineRef} role="log" aria-label="RPC message timeline">
                           {(() => {
                             const sessionMessages = activeSessionId ? rpcMessages.filter(msg => msg.sessionId === activeSessionId) : rpcMessages
                             if (sessionMessages.length === 0) {
@@ -11475,6 +11624,7 @@ export function App() {
                                   aria-selected={isSelected}
                                 >
                                   <span className="activity-time">{time}</span>
+                                  <span className={`activity-direction ${msg.direction}`} title={msg.direction}>{msg.direction === 'outgoing' ? '↑' : '↓'}</span>
                                   <span className="activity-type">{typeLabel}</span>
                                   <span className="activity-label">{label}</span>
                                 </button>

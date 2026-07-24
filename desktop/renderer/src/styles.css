@@ -3178,3 +3178,39 @@ button:focus-visible {
     height: auto;
   }
 }
+
+.autoscroll-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.autoscroll-toggle input {
+  margin: 0;
+}
+
+.activity-direction {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  line-height: 16px;
+  text-align: center;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: bold;
+  margin-right: 4px;
+}
+
+.activity-direction.incoming {
+  background: color-mix(in srgb, #4CAF50 20%, transparent);
+  color: #4CAF50;
+}
+
+.activity-direction.outgoing {
+  background: color-mix(in srgb, #2196F3 20%, transparent);
+  color: #2196F3;
+}
