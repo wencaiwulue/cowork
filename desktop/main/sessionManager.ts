@@ -247,6 +247,7 @@ export class DesktopSessionManager {
     session.updatedAt = Date.now()
     await this.persist()
     this.emit({ type: 'session-updated', session })
+    this.emit({ type: 'runtime-message', sessionId: session.id, message: { type: 'outgoing:user-send', text, timestamp: Date.now() } })
     host.sendMessage(text)
   }
 
@@ -433,9 +434,13 @@ export class DesktopSessionManager {
     })
 
     host.on('stderr', message => {
+      const text = String(message)
       const stderr = this.stderrBySession.get(session.id) ?? []
-      stderr.push(String(message))
+      stderr.push(text)
       this.stderrBySession.set(session.id, stderr.slice(-12))
+      if (text.trim()) {
+        this.emit({ type: 'runtime-message', sessionId: session.id, message: { type: 'runtime:stderr', text, timestamp: Date.now() } })
+      }
     })
 
     host.on('exit', async (code, signal) => {

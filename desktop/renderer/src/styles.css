@@ -3214,3 +3214,24 @@ button:focus-visible {
   background: color-mix(in srgb, #2196F3 20%, transparent);
   color: #2196F3;
 }
+
+.nav-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 10px;
+  font-weight: 600;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+}
+
+.primary-nav button {
+  position: relative;
+}

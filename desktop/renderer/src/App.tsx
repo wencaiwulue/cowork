@@ -1251,6 +1251,16 @@ function extractRpcMessageInfo(raw: unknown): RpcMessage['parsed'] {
     }
   }
 
+  // Outgoing user send
+  if (type === 'outgoing:user-send') {
+    result.content = typeof msg.text === 'string' ? msg.text : JSON.stringify(msg)
+  }
+
+  // Runtime stderr output
+  if (type === 'runtime:stderr') {
+    result.content = typeof msg.text === 'string' ? msg.text.trim() : JSON.stringify(msg)
+  }
+
   // Final result
   if (type === 'result') {
     result.content = typeof msg.result === 'string' ? msg.result.slice(0, 500) : JSON.stringify(msg.result).slice(0, 500)
@@ -10244,6 +10254,9 @@ export function App() {
           <button {...primaryNavState('agents')} onClick={handlePrimaryNavClick('agents')}>
             <Icon name="bot" />
             <span>Agents</span>
+            {rpcMessages.filter(m => m.direction === 'incoming' && m.parsed?.isToolUse).length > 0 && primaryNavView !== 'agents' && (
+              <span className="nav-badge">{rpcMessages.filter(m => m.direction === 'incoming' && m.parsed?.isToolUse).length}</span>
+            )}
             <small className="nav-shortcut">⌘2</small>
           </button>
           <button {...primaryNavState('teams')} onClick={handlePrimaryNavClick('teams')}>
