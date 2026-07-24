@@ -400,7 +400,9 @@ h2 {
 .workspace-layout.primary-agents,
 .workspace-layout.primary-teams,
 .workspace-layout.primary-teammates,
-.workspace-layout.primary-tasks {
+.workspace-layout.primary-tasks,
+.workspace-layout.primary-mcp,
+.workspace-layout.primary-skills {
   grid-template-columns: minmax(0, 1fr) !important;
 }
 
@@ -409,16 +411,22 @@ h2 {
 .workspace-layout.primary-teams .chat-pane,
 .workspace-layout.primary-teammates .chat-pane,
 .workspace-layout.primary-tasks .chat-pane,
+.workspace-layout.primary-mcp .chat-pane,
+.workspace-layout.primary-skills .chat-pane,
 .workspace-layout.primary-settings .resize-handle,
 .workspace-layout.primary-agents .resize-handle,
 .workspace-layout.primary-teams .resize-handle,
 .workspace-layout.primary-teammates .resize-handle,
 .workspace-layout.primary-tasks .resize-handle,
+.workspace-layout.primary-mcp .resize-handle,
+.workspace-layout.primary-skills .resize-handle,
 .workspace-layout.primary-settings .pane-tabs,
 .workspace-layout.primary-agents .pane-tabs,
 .workspace-layout.primary-teams .pane-tabs,
 .workspace-layout.primary-teammates .pane-tabs,
-.workspace-layout.primary-tasks .pane-tabs {
+.workspace-layout.primary-tasks .pane-tabs,
+.workspace-layout.primary-mcp .pane-tabs,
+.workspace-layout.primary-skills .pane-tabs {
   display: none;
 }
 
@@ -480,6 +488,8 @@ h2 {
   .agents-pane,
   .teams-pane,
   .tasks-pane,
+  .mcp-pane,
+  .skills-pane,
   .settings-section pre
 ) {
   scrollbar-color: var(--scrollbar-thumb) transparent;
@@ -501,6 +511,8 @@ h2 {
   .agents-pane,
   .teams-pane,
   .tasks-pane,
+  .mcp-pane,
+  .skills-pane,
   .settings-section pre
 )::-webkit-scrollbar {
   width: 10px;
@@ -521,6 +533,8 @@ h2 {
   .agents-pane,
   .teams-pane,
   .tasks-pane,
+  .mcp-pane,
+  .skills-pane,
   .settings-section pre
 )::-webkit-scrollbar-track {
   background: var(--scrollbar-track);
@@ -540,6 +554,8 @@ h2 {
   .agents-pane,
   .teams-pane,
   .tasks-pane,
+  .mcp-pane,
+  .skills-pane,
   .settings-section pre
 )::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
@@ -561,6 +577,9 @@ h2 {
   .settings-content,
   .agents-pane,
   .teams-pane,
+  .tasks-pane,
+  .mcp-pane,
+  .skills-pane,
   .settings-section pre
 )::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-thumb-hover);
@@ -1019,6 +1038,27 @@ button[data-tooltip]:disabled::after {
   font-size: 11px;
 }
 
+.activity-card .workarea-empty,
+.todos-card .workarea-empty {
+  padding: 12px 16px;
+  gap: 4px;
+}
+
+.activity-card .workarea-empty .glyph {
+  width: 18px;
+  height: 18px;
+  flex-basis: 18px;
+}
+
+.activity-card .workarea-empty strong {
+  font-size: 12px;
+}
+
+.activity-card .workarea-empty span {
+  font-size: 11px;
+  line-height: 1.3;
+}
+
 .activity-card p {
   margin: 0;
 }
@@ -1310,6 +1350,19 @@ button[data-tooltip]:disabled::after {
   .composer .send-button {
     width: 100%;
     justify-content: center;
+  }
+
+  .composer-actions {
+    grid-column: 1 / -1;
+    flex-direction: row;
+  }
+
+  .composer-actions .attach-button {
+    flex: 0 0 auto;
+  }
+
+  .composer-actions .send-button {
+    flex: 1;
   }
 
   .conversation-activity {
@@ -2012,7 +2065,9 @@ button:focus-visible {
 
 .agents-pane,
 .teams-pane,
-.tasks-pane {
+.tasks-pane,
+.mcp-pane,
+.skills-pane {
   height: 100%;
   overflow: auto;
   padding-bottom: 12px;
@@ -2022,7 +2077,9 @@ button:focus-visible {
 .workspace-layout.primary-settings .settings-pane,
 .workspace-layout.primary-agents .agents-pane,
 .workspace-layout.primary-teams .teams-pane,
-.workspace-layout.primary-tasks .tasks-pane {
+.workspace-layout.primary-tasks .tasks-pane,
+.workspace-layout.primary-mcp .mcp-pane,
+.workspace-layout.primary-skills .skills-pane {
   background:
     linear-gradient(90deg, rgba(200, 111, 69, 0.045), transparent 260px),
     #fffdfa;
@@ -2031,7 +2088,9 @@ button:focus-visible {
 .workspace-layout.primary-settings .settings-pane,
 .workspace-layout.primary-agents .agents-pane,
 .workspace-layout.primary-teams .teams-pane,
-.workspace-layout.primary-tasks .tasks-pane {
+.workspace-layout.primary-tasks .tasks-pane,
+.workspace-layout.primary-mcp .mcp-pane,
+.workspace-layout.primary-skills .skills-pane {
   padding: 0;
 }
 
@@ -2039,7 +2098,9 @@ button:focus-visible {
 .workspace-layout.primary-agents .settings-section,
 .workspace-layout.primary-teams .settings-section,
 .workspace-layout.primary-teammates .settings-section,
-.workspace-layout.primary-tasks .settings-section {
+.workspace-layout.primary-tasks .settings-section,
+.workspace-layout.primary-mcp .settings-section,
+.workspace-layout.primary-skills .settings-section {
   max-width: 1120px;
   margin-right: auto;
   margin-left: auto;
@@ -2205,7 +2266,9 @@ button:focus-visible {
 .settings-pane > .pane-toolbar,
 .agents-pane > .pane-toolbar,
 .teams-pane > .pane-toolbar,
-.tasks-pane > .pane-toolbar {
+.tasks-pane > .pane-toolbar,
+.mcp-pane > .pane-toolbar,
+.skills-pane > .pane-toolbar {
   position: sticky;
   top: 0;
   z-index: 3;
@@ -2224,12 +2287,12 @@ button:focus-visible {
 
 .settings-content .settings-section {
   max-width: 1120px;
-  margin: 0 auto 12px;
+  margin: 0 auto 20px;
   padding: 16px;
   border: 1px solid var(--hairline);
   border-radius: 8px;
   background: #fff;
-  box-shadow: var(--shadow-soft);
+  box-shadow: 0 2px 8px rgba(36, 33, 29, 0.12);
   border-bottom: 1px solid var(--hairline);
 }
 
@@ -3009,11 +3072,11 @@ button:focus-visible {
 
 .activity-item {
   display: grid;
-  grid-template-columns: auto auto 1fr;
-  gap: 8px;
+  grid-template-columns: auto auto auto auto 1fr;
+  gap: 6px;
   align-items: start;
   width: 100%;
-  padding: 8px 12px;
+  padding: 6px 10px;
   border: none;
   border-bottom: 1px solid var(--border);
   background: transparent;
@@ -3279,30 +3342,6 @@ button:focus-visible {
   max-height: 380px;
 }
 
-@media (prefers-color-scheme: dark) {
-  .composer-menu {
-    background: #1e1e1e;
-    border-color: rgba(255, 255, 255, 0.1);
-    box-shadow: 0 16px 38px rgba(0, 0, 0, 0.4);
-  }
-  
-  .composer-menu button:hover,
-  .composer-menu button:focus-visible,
-  .composer-menu button.active,
-  .composer-menu button[aria-selected="true"] {
-    background: #2d2d2d;
-  }
-  
-  .composer-menu-divider {
-    border-color: rgba(255, 255, 255, 0.1);
-  }
-  
-  .composer-menu-empty {
-    background: #252525;
-    border-color: rgba(255, 255, 255, 0.1);
-  }
-}
-
 .skill-contents-row {
   flex-direction: column;
   align-items: stretch;
@@ -3341,6 +3380,7 @@ button:focus-visible {
 
 /* Composer mention chips */
 .composer-mentions {
+  grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -3401,4 +3441,252 @@ button:focus-visible {
   color: var(--text-muted, var(--text));
   opacity: 0.7;
   margin-left: 4px;
+}
+
+/* Slash command chip in composer */
+.composer-command-chip {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+  flex-wrap: wrap;
+}
+
+.command-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 10px;
+  border-radius: 16px;
+  font-size: 13px;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.command-chip svg {
+  width: 14px;
+  height: 14px;
+}
+
+.command-chip-label {
+  font-variant-numeric: tabular-nums;
+}
+
+.command-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin-left: 2px;
+  border: none;
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+  color: var(--accent);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.command-chip-remove:hover {
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.command-chip-remove svg {
+  width: 10px;
+  height: 10px;
+}
+
+.command-chip-hint {
+  font-size: 11px;
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+
+/* Composer attachments */
+.composer-attachments {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.attachment-thumb {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+}
+
+.attachment-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.attachment-remove {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.55);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.attachment-remove svg {
+  width: 10px;
+  height: 10px;
+}
+
+.attachment-remove:hover {
+  background: rgba(0,0,0,0.75);
+}
+
+.composer-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.attach-button {
+  padding: 6px 10px;
+  justify-content: center;
+}
+
+/* Message attachments in chat */
+.message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.message-attachments a {
+  display: block;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  max-height: 160px;
+}
+
+.message-attachments img {
+  display: block;
+  max-height: 160px;
+  max-width: 280px;
+  object-fit: contain;
+}
+
+/* Tasks/MCP/Skills panes: full-width section cards with clear isolation */
+.tasks-pane .settings-section,
+.mcp-pane .settings-section,
+.skills-pane .settings-section {
+  max-width: none;
+  margin: 0 auto 20px;
+  padding: 16px 20px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(36, 33, 29, 0.12);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.tasks-pane .settings-section .settings-section,
+.mcp-pane .settings-section .settings-section,
+.skills-pane .settings-section .settings-section {
+  margin: 12px 0 0;
+  padding: 12px 0 0;
+  border: 0;
+  border-top: 1px solid var(--hairline);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* Plan approval bar */
+.plan-approval-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  background: linear-gradient(135deg, #e8f5e9, #f1f8e9);
+  border-top: 1px solid #c8e6c9;
+  border-bottom: 1px solid #c8e6c9;
+  flex-shrink: 0;
+}
+
+.plan-approval-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #2e7d32;
+  font-weight: 500;
+}
+
+.plan-approval-content svg {
+  width: 18px;
+  height: 18px;
+  color: #43a047;
+  flex-shrink: 0;
+}
+
+.plan-approval-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.plan-approval-actions .tool-button,
+.plan-approval-actions .send-button {
+  font-size: 12px;
+  padding: 6px 14px;
+}
+
+.plan-approve {
+  background: #43a047 !important;
+}
+
+.plan-reject {
+  color: #c62828;
+}
+
+/* RPC activity session label */
+
+.activity-session-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.activity-session {
+  font-size: 10px;
+  font-family: var(--mono, monospace);
+  font-weight: 600;
+  flex-shrink: 0;
+  min-width: 60px;
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

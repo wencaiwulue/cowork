@@ -120,11 +120,12 @@ export function validateIpcArgs(
       expectArity(channel, args, 1)
       return [expectStringArg(channel, args, 0, 'sessionId')]
     case 'sessions:send': {
-      expectArity(channel, args, 2)
+      expectArity(channel, args, 2, 3)
       return [
         expectStringArg(channel, args, 0, 'sessionId'),
         expectNonEmptyStringArg(channel, args, 1, 'text'),
-      ]
+        args[2] === undefined ? undefined : args[2],
+      ].filter(value => value !== undefined)
     }
     case 'sessions:launchAgentTask': {
       expectArity(channel, args, 2)
@@ -442,12 +443,20 @@ export type PermissionResponse =
       decisionClassification?: 'user_reject'
     }
 
+export type DesktopAttachment = {
+  id: string
+  mimeType: string
+  filename: string
+  dataUrl: string
+}
+
 export type DesktopMessage = {
   id: string
   role: 'user' | 'assistant' | 'thinking' | 'system' | 'tool'
   text: string
   streaming?: boolean
   raw?: unknown
+  attachments?: DesktopAttachment[]
 }
 
 export type AgentSource =

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { existsSync } from 'node:fs'
 import { createNdjsonParser } from './ndjson'
 import { applyDesktopRuntimeEnv } from './config'
-import type { PermissionResponse } from './ipc'
+import type { DesktopAttachment, PermissionResponse } from './ipc'
 
 export type SessionHostChild = Pick<
   ChildProcessWithoutNullStreams,
@@ -32,7 +32,7 @@ export type SessionHostOptions = {
 export type SessionHost = EventEmitter & {
   readonly sessionId: string
   readonly cwd: string
-  sendMessage(text: string): void
+  sendMessage(text: string, attachments?: DesktopAttachment[]): void
   respondToPermission(requestId: string, response: PermissionResponse): void
   cancel(): void
   close(): void
@@ -213,13 +213,34 @@ export function createSessionHost(options: SessionHostOptions): SessionHost {
 
   attachChild(child)
 
-  host.sendMessage = (text: string) => {
+  host.sendMessage = (text: string, attachments?: DesktopAttachment[]) => {
     rotateChildForNextTurn()
+    let content: unknown = text
+    if (attachments?.length) {
+      const blocks: unknown[] = []
+      if (text) {
+        blocks.push({ type: 'text', text })
+      }
+      for (const att of attachments) {
+        if (att.mimeType.startsWith('image/')) {
+          const b64Data = att.dataUrl.split(',')[1] ?? ''
+          blocks.push({
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: att.mimeType,
+              data: b64Data,
+            },
+          })
+        }
+      }
+      if (blocks.length) content = blocks
+    }
     writeJsonLine(child, {
       type: 'user',
       message: {
         role: 'user',
-        content: text,
+        content,
       },
       parent_tool_use_id: null,
       session_id: options.sessionId,

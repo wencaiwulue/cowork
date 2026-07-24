@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { open } from 'node:fs/promises'
 import type { BrowserWindow } from 'electron'
 import {
+  type DesktopAttachment,
   type DesktopMessage,
   type DesktopSession,
   type DesktopSessionLayoutPatch,
@@ -233,7 +234,7 @@ export class DesktopSessionManager {
     }
   }
 
-  async send(sessionId: string, text: string): Promise<void> {
+  async send(sessionId: string, text: string, attachments?: DesktopAttachment[]): Promise<void> {
     const session = this.getSession(sessionId)
     const host = this.hosts.get(sessionId) ?? this.startHost(session)
     this.streamingMessageBySession.delete(sessionId)
@@ -241,14 +242,15 @@ export class DesktopSessionManager {
       id: randomUUID(),
       role: 'user',
       text,
+      ...(attachments?.length ? { attachments } : {}),
     }
     session.messages.push(message)
     session.activity = 'sending'
     session.updatedAt = Date.now()
     await this.persist()
     this.emit({ type: 'session-updated', session })
-    this.emit({ type: 'runtime-message', sessionId: session.id, message: { type: 'outgoing:user-send', text, timestamp: Date.now() } })
-    host.sendMessage(text)
+    this.emit({ type: 'runtime-message', sessionId: session.id, message: { type: 'outgoing:user-send', text, timestamp: Date.now(), attachments } })
+    host.sendMessage(text, attachments)
   }
 
   async cancel(sessionId: string): Promise<void> {

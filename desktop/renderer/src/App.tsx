@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type {
   ChangeEvent as ReactChangeEvent,
+  ClipboardEvent as ReactClipboardEvent,
+  DragEvent as ReactDragEvent,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
   MutableRefObject,
@@ -13,6 +15,7 @@ import {
   Bot,
   Braces,
   Check,
+  CheckCircle2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -55,6 +58,7 @@ import type {
   AgentSource,
   CustomCommandInfo,
   DesktopProxySettings,
+  DesktopAttachment,
   DesktopMessage,
   DesktopSession,
   DesktopSessionLayoutPatch,
@@ -427,6 +431,7 @@ type IconName =
   | 'chevron-left'
   | 'chevron-right'
   | 'check'
+  | 'check-circle'
   | 'clipboard'
   | 'code'
   | 'diff'
@@ -469,6 +474,7 @@ const iconComponents: Record<IconName, LucideIcon> = {
   'chevron-left': ChevronLeft,
   'chevron-right': ChevronRight,
   check: Check,
+  'check-circle': CheckCircle2,
   clipboard: Clipboard,
   code: Braces,
   diff: GitCompare,
@@ -1145,6 +1151,40 @@ function isValidCronPart(part: string, min: number, max: number): boolean {
 }
 
 
+// Stable color palette for session labels
+const SESSION_COLORS = ['#e57373', '#64b5f6', '#81c784', '#ffb74d', '#ba68c8', '#4db6ac', '#f06292', '#9575cd', '#4fc3f7', '#aed581', '#ff8a65', '#7986cb']
+
+function sessionColor(sessionId: string): string {
+  let hash = 0
+  for (let i = 0; i < sessionId.length; i++) {
+    hash = ((hash << 5) - hash + sessionId.charCodeAt(i)) | 0
+  }
+  return SESSION_COLORS[Math.abs(hash) % SESSION_COLORS.length]!
+}
+
+function sessionShortId(sessionId: string): string {
+  return sessionId.slice(0, 8)
+}
+
+
+function sessionAbbreviation(sessionId: string, sessions: DesktopSession[]): string {
+  const session = sessions.find(s => s.id === sessionId)
+  if (session) {
+    const name = session.cwd?.split('/').pop() ?? session.title ?? ''
+    if (name) return name
+  }
+  return sessionShortId(sessionId)
+}
+
+function sessionNameForId(sessionId: string, sessions: DesktopSession[]): string {
+  const session = sessions.find(s => s.id === sessionId)
+  if (session) {
+    const name = session.cwd?.split('/').pop() ?? session.title ?? ''
+    return name ? `${name} (${sessionShortId(sessionId)})` : sessionShortId(sessionId)
+  }
+  return sessionShortId(sessionId)
+}
+
 function extractRpcMessageInfo(raw: unknown): RpcMessage['parsed'] {
   if (!raw || typeof raw !== 'object') return undefined
   const msg = raw as Record<string, unknown>
@@ -1654,6 +1694,114 @@ export function App() {
   const [rpcAutoScroll, setRpcAutoScroll] = useState(true)
   const rpcTimelineRef = useRef<HTMLDivElement>(null)
   const rpcMessageIdRef = useRef(0)
+  const [planApprovalPending, setPlanApprovalPending] = useState(false)
+  const lastCheckedMessageIdRef = useRef<string>('')
+
+  function detectPlanApprovalPrompt(messages: Array<{ id: string; role: string; text: string; streaming?: boolean }>): void {
+    if (!messages.length) return
+    const lastMsg = messages[messages.length - 1]
+    if (!lastMsg || lastMsg.role !== 'assistant' || lastMsg.streaming) return
+    if (lastCheckedMessageIdRef.current === lastMsg.id) return
+    lastCheckedMessageIdRef.current = lastMsg.id
+    const text = lastMsg.text.toLowerCase()
+    const approvalKeywords = [
+      '等待你确认',
+      '等你确认',
+      '等待您确认',
+      'approve the plan',
+      'approve this plan',
+      'waiting for your approval',
+      'waiting for your confirmation',
+      'waiting for you to confirm',
+      'wait for your confirmation',
+      'ready for your review',
+      'plan is ready',
+      'please review and approve',
+      'please confirm',
+      "i've exited plan mode",
+      'exit plan mode',
+    ]
+    const isApprovalPrompt = approvalKeywords.some(kw => text.includes(kw))
+    setPlanApprovalPending(isApprovalPrompt)
+  }
+
+  function approvePlan(): void {
+    setPlanApprovalPending(false)
+    setInput('Yes, approve this plan and proceed with implementation.')
+    window.requestAnimationFrame(() => {
+      composerTextareaRef.current?.focus()
+      const sendBtn = document.querySelector('.send-button') as HTMLButtonElement | null
+      if (sendBtn && !sendBtn.disabled) sendBtn.click()
+    })
+  }
+
+  function rejectPlan(): void {
+    setPlanApprovalPending(false)
+    setInput('Please revise the plan: ')
+    window.requestAnimationFrame(() => {
+      composerTextareaRef.current?.focus()
+    })
+  }
+
+
+  function addAttachmentFromFile(file: File): void {
+    if (!file.type.startsWith('image/')) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result
+      if (typeof result !== 'string') return
+      const att: DesktopAttachment = {
+        id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        mimeType: file.type,
+        filename: file.name || 'pasted-image',
+        dataUrl: result,
+      }
+      setComposerAttachments(prev => [...prev, att])
+    }
+    reader.readAsDataURL(file)
+  }
+
+  function removeComposerAttachment(id: string): void {
+    setComposerAttachments(prev => prev.filter(a => a.id !== id))
+  }
+
+  function handleComposerPaste(event: ReactClipboardEvent<HTMLTextAreaElement>): void {
+    const items = event.clipboardData?.items
+    if (!items) return
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const file = item.getAsFile()
+        if (file) addAttachmentFromFile(file)
+      }
+    }
+  }
+
+  function handleComposerDragOver(event: ReactDragEvent<HTMLElement>): void {
+    if (Array.from(event.dataTransfer.items).some(item => item.kind === 'file' && item.type.startsWith('image/'))) {
+      event.preventDefault()
+    }
+  }
+
+  function handleComposerDrop(event: ReactDragEvent<HTMLElement>): void {
+    const files = Array.from(event.dataTransfer.files).filter(f => f.type.startsWith('image/'))
+    if (!files.length) return
+    event.preventDefault()
+    for (const file of files) addAttachmentFromFile(file)
+  }
+
+  function handleAttachButtonClick(): void {
+    fileInputRef.current?.click()
+  }
+
+  function handleFileInputChange(event: ReactChangeEvent<HTMLInputElement>): void {
+    const files = event.target.files
+    if (!files) return
+    for (const file of Array.from(files)) {
+      if (file.type.startsWith('image/')) addAttachmentFromFile(file)
+    }
+    event.target.value = ''
+  }
 
   function copySelectedRpcJson(): void {
     if (!selectedRpcMessage) return
@@ -1717,7 +1865,10 @@ export function App() {
     agentType: '',
   })
   const [composerCursor, setComposerCursor] = useState(0)
+  const [composerAttachments, setComposerAttachments] = useState<DesktopAttachment[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [composerMenuActiveIndex, setComposerMenuActiveIndex] = useState(0)
+  const [activeSlashCommand, setActiveSlashCommand] = useState<{ name: string; label: string; icon: IconName } | null>(null)
   const [sessionCreateMenu, setSessionCreateMenu] = useState<SessionCreateMenuState>()
   const [sessionCreateMenuActiveIndex, setSessionCreateMenuActiveIndex] = useState(0)
   const sessionCreateMenuItemIds = [
@@ -4555,6 +4706,20 @@ export function App() {
     }
   }
 
+  function slashPromptDescription(command: string): string {
+    switch (command) {
+      case '/review-diff': return 'Review current git changes'
+      case '/explain-file': return 'Explain the referenced file in detail'
+      case '/write-tests': return 'Write comprehensive tests for the code'
+      case '/run-tests': return 'Run the project test suite'
+      case '/fix-bugs': return 'Find and fix bugs in the codebase'
+      case '/refactor': return 'Refactor code for clarity and performance'
+      case '/document': return 'Add or update documentation'
+      case '/plan': return 'Create a step-by-step implementation plan'
+      default: return ''
+    }
+  }
+
   function enabledComposerMenuIndex(
     start: number,
     direction: 1 | -1,
@@ -4586,25 +4751,28 @@ export function App() {
     
     // Slash commands
     if (trigger.kind === '/') {
-      const promptText = item.value?.startsWith('/') ? slashPrompt(item.value) : item.value
-      if (promptText) {
-        // Insert the generated prompt and auto-send
-        const result = applyComposerMenuValue({ input, cursor: composerCursor, value: promptText })
-        setInput(result.input)
-        setComposerCursor(result.cursor)
-        // Auto-send after slash command prompt is inserted
-        window.requestAnimationFrame(() => {
-          const textarea = composerTextareaRef.current
-          if (textarea) {
-            textarea.blur()
-          }
-          // Trigger send after state update
-          setTimeout(() => {
-            void sendMessage()
-          }, 50)
-        })
+      const slashValue = item.value
+      if (slashValue && slashValue.startsWith('/')) {
+        const commandName = slashValue.slice(1)
+        const promptText = slashPrompt(slashValue)
+        if (promptText) {
+          // Prompt-type command: set as active chip, clear the /, focus for user input
+          setActiveSlashCommand({
+            name: commandName,
+            label: commandName,
+            icon: item.icon ?? 'code',
+          })
+          setInput(value => value.slice(0, trigger.start) + value.slice(trigger.end))
+          setComposerCursor(trigger.start)
+          window.requestAnimationFrame(() => composerTextareaRef.current?.focus())
+        } else {
+          // Navigation/create action: execute immediately
+          setInput(value => value.slice(0, trigger.start) + value.slice(trigger.end))
+          setComposerCursor(trigger.start)
+          window.requestAnimationFrame(() => composerTextareaRef.current?.focus())
+        }
       } else {
-        // Empty value means navigation action, clear the /
+        // No value means direct action (already handled by item.action)
         setInput(value => value.slice(0, trigger.start) + value.slice(trigger.end))
         setComposerCursor(trigger.start)
         window.requestAnimationFrame(() => composerTextareaRef.current?.focus())
@@ -4953,6 +5121,14 @@ export function App() {
     const { target: resolvedTarget, cleanText, contextMentions } = resolveChatTargetFromInput(rawText)
     // Build enriched text with context mentions
     let text = cleanText
+    // Prepend slash command system prompt if active
+    const slashCmd = activeSlashCommand
+    if (slashCmd) {
+      const cmdPrompt = slashPrompt('/' + slashCmd.name)
+      if (cmdPrompt) {
+        text = cmdPrompt + (text ? '\n\n' + text : '')
+      }
+    }
     if (contextMentions.length > 0) {
       const contextParts: string[] = []
       for (const cm of contextMentions) {
@@ -4970,6 +5146,7 @@ export function App() {
     }
     setInput('')
     setComposerCursor(0)
+    setActiveSlashCommand(null)
     setConversationNotice(undefined)
     
     // Validate resolved target
@@ -5018,8 +5195,10 @@ export function App() {
           setChatTarget({ type: 'session', teamName: '', agentType: '' })
           return
         }
-        recordOutgoingRpcMessage(session.id, 'user:send', { text })
-        await window.claudeDesktop.sessions.send(session.id, text)
+        const pendingAttachments = [...composerAttachments]
+        setComposerAttachments([])
+        recordOutgoingRpcMessage(session.id, 'user:send', { text, attachments: pendingAttachments })
+        await window.claudeDesktop.sessions.send(session.id, text, pendingAttachments.length ? pendingAttachments : undefined)
       })
     } finally {
       sendActionPendingRef.current = false
@@ -5909,6 +6088,19 @@ export function App() {
     selectWorkspacePane(event.pane)
   }, [pendingDesktopNavigation])
 
+
+  useEffect(() => {
+    detectPlanApprovalPrompt(activeSession?.messages ?? [])
+  }, [activeSession?.messages])
+
+  // Clear plan approval when user manually modifies the composer
+  useEffect(() => {
+    if (!planApprovalPending) return
+    if (!input.trim()) return
+    // Only clear if the input is NOT from our approve/reject buttons
+    if (input.startsWith('Yes, approve this plan') || input.startsWith('Please revise the plan:')) return
+    setPlanApprovalPending(false)
+  }, [input])
 
   useEffect(() => {
     if (!rpcAutoScroll || !rpcTimelineRef.current) return
@@ -8284,6 +8476,11 @@ export function App() {
   function handleAgentsTasksSectionClick(): void {
     if (loadingLabel) return
     openPaneSection('agents', 'agents-tasks', 'agents')
+  }
+
+  function handleAgentsActivitySectionClick(): void {
+    if (loadingLabel) return
+    openPaneSection('agents', 'agents-activity', 'agents')
   }
 
   function handleAgentLaunchAgentTypeChange(event: ReactChangeEvent<HTMLInputElement>): void {
@@ -10883,6 +11080,15 @@ export function App() {
                       <Icon name={copied ? 'check' : 'clipboard'} />
                     </button>
                   </div>
+                  {message.attachments && message.attachments.length > 0 && (
+                    <div className="message-attachments">
+                      {message.attachments.map(att => (
+                        <a key={att.id} href={att.dataUrl} target="_blank" rel="noopener noreferrer" title={att.filename}>
+                          <img src={att.dataUrl} alt={att.filename} />
+                        </a>
+                      ))}
+                    </div>
+                  )}
                   <MessageContent
                     message={message}
                     onCopyCode={text => void copyText(codeCopyTarget, text)}
@@ -10899,6 +11105,23 @@ export function App() {
               </div>
             )}
           </section>
+
+          {planApprovalPending && activeSession && !loadingLabel && (
+            <div className="plan-approval-bar" role="region" aria-label="Plan approval">
+              <div className="plan-approval-content">
+                <Icon name="check-circle" />
+                <span>Plan ready for your review — approve to proceed, or reject to request revisions</span>
+              </div>
+              <div className="plan-approval-actions">
+                <button className="tool-button plan-reject" onClick={rejectPlan}>
+                  <Icon name="x" />Request changes
+                </button>
+                <button className="send-button plan-approve" onClick={approvePlan}>
+                  <Icon name="check" />Approve &amp; proceed
+                </button>
+              </div>
+            </div>
+          )}
 
           <footer className="composer">
             <div className="composer-targets" aria-label="Chat target">
@@ -10941,6 +11164,23 @@ export function App() {
                 </select>
               )}
             </div>
+            {activeSlashCommand && (
+              <div className="composer-command-chip" aria-label="Active command">
+                <span className="command-chip">
+                  <Icon name={activeSlashCommand.icon} />
+                  <span className="command-chip-label">/{activeSlashCommand.label}</span>
+                  <button
+                    type="button"
+                    className="command-chip-remove"
+                    onClick={() => setActiveSlashCommand(null)}
+                    aria-label={`Remove /${activeSlashCommand.label} command`}
+                  >
+                    <Icon name="x" />
+                  </button>
+                </span>
+                <span className="command-chip-hint">{slashPromptDescription('/' + activeSlashCommand.name)}</span>
+              </div>
+            )}
             {parsedMentions.length > 0 && !currentComposerTrigger && (
               <div className="composer-mentions" aria-label="Detected mentions">
                 {parsedMentions.map((m, i) => (
@@ -11018,6 +11258,26 @@ export function App() {
                 )}
               </div>
             )}
+            {composerAttachments.length > 0 && (
+              <div className="composer-attachments" role="group" aria-label="Attached images">
+                {composerAttachments.map(att => (
+                  <div key={att.id} className="attachment-thumb">
+                    <img src={att.dataUrl} alt={att.filename} />
+                    <button type="button" className="attachment-remove" onClick={() => removeComposerAttachment(att.id)} aria-label={`Remove ${att.filename}`}>
+                      <Icon name="x" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              style={{ display: 'none' }}
+              onChange={handleFileInputChange}
+            />
             <textarea
               ref={composerTextareaRef}
               value={input}
@@ -11033,14 +11293,22 @@ export function App() {
               onKeyUp={event => updateComposerSelection(event.currentTarget)}
               onSelect={event => updateComposerSelection(event.currentTarget)}
               onKeyDown={handleComposerKeyDown}
-              placeholder="Ask Claude to inspect, edit, test, or explain this workspace"
+              onPaste={handleComposerPaste}
+              onDragOver={handleComposerDragOver}
+              onDrop={handleComposerDrop}
+              placeholder={activeSlashCommand ? `Type your message for /${activeSlashCommand.name}...` : "Ask Claude to inspect, edit, test, or explain this workspace"}
               aria-label="Message Claude"
               disabled={!activeSession || !!loadingLabel}
             />
-            <button className="send-button" onClick={handleComposerSendClick} disabled={!activeSession || turnBusy || !input.trim() || !!loadingLabel}>
-              <Icon name="send" />
-              Send
-            </button>
+            <div className="composer-actions">
+              <button type="button" className="tool-button attach-button" onClick={handleAttachButtonClick} disabled={!activeSession || !!loadingLabel} title="Attach image">
+                <Icon name="file" />
+              </button>
+              <button className="send-button" onClick={handleComposerSendClick} disabled={!activeSession || turnBusy || (!input.trim() && composerAttachments.length === 0) || !!loadingLabel}>
+                <Icon name="send" />
+                Send
+              </button>
+            </div>
           </footer>
         </section>
 
@@ -11940,7 +12208,7 @@ export function App() {
                       <div className="activity-layout">
                         <div className="activity-timeline" ref={rpcTimelineRef} role="log" aria-label="RPC message timeline">
                           {(() => {
-                            const sessionMessages = activeSessionId ? rpcMessages.filter(msg => msg.sessionId === activeSessionId) : rpcMessages
+                            const sessionMessages = rpcMessages
                             if (sessionMessages.length === 0) {
                             return (
                             <div className="workarea-empty settings-empty-state">
@@ -11972,9 +12240,12 @@ export function App() {
                                   className={`activity-item ${isSelected ? 'selected' : ''} ${isTool ? 'tool-event' : ''}`}
                                   onClick={() => setSelectedRpcMessage(msg)}
                                   aria-selected={isSelected}
+                                  title={sessionNameForId(msg.sessionId, sessions)}
                                 >
                                   <span className="activity-time">{time}</span>
                                   <span className={`activity-direction ${msg.direction}`} title={msg.direction}>{msg.direction === 'outgoing' ? '↑' : '↓'}</span>
+                                  <span className="activity-session-dot" style={{ background: sessionColor(msg.sessionId) }} />
+                                  <span className="activity-session" style={{ color: sessionColor(msg.sessionId) }}>{sessionAbbreviation(msg.sessionId, sessions)}</span>
                                   <span className="activity-type">{typeLabel}</span>
                                   <span className="activity-label">{label}</span>
                                 </button>
@@ -11992,7 +12263,7 @@ export function App() {
                               <div className="activity-meta">
                                 <div><small>Type</small><code>{selectedRpcMessage.type}</code></div>
                                 {selectedRpcMessage.subtype && <div><small>Subtype</small><code>{selectedRpcMessage.subtype}</code></div>}
-                                <div><small>Session</small><code>{selectedRpcMessage.sessionId.slice(0, 12)}...</code></div>
+                                <div><small>Session</small><code>{sessionNameForId(selectedRpcMessage.sessionId, sessions)}</code></div>
                                 <div><small>Direction</small><code>{selectedRpcMessage.direction}</code></div>
                               </div>
                               {selectedRpcMessage.parsed?.toolName && (

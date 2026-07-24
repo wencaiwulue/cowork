@@ -17,6 +17,7 @@ import {
   type DesktopProxySettings,
   type DesktopSessionLayoutPatch,
   type AgentLaunchInput,
+  type DesktopAttachment,
   type AgentSaveInput,
   type AgentSource,
   type AgentTaskOutputInput,
@@ -635,8 +636,8 @@ function registerIpc(): void {
   handleIpc('sessions:close', (sessionId: string) =>
     sessionManager.close(sessionId),
   )
-  handleIpc('sessions:send', (sessionId: string, text: string) =>
-    sessionManager.send(sessionId, text),
+  handleIpc('sessions:send', (sessionId: string, text: string, attachments?: DesktopAttachment[]) =>
+    sessionManager.send(sessionId, text, attachments),
   )
   handleIpc('sessions:launchAgentTask', async (sessionId: string, input: AgentLaunchInput) => {
     const session = sessionManager.getSession(sessionId)

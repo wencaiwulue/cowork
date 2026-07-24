@@ -63,8 +63,8 @@ const api = {
       ipcRenderer.invoke('sessions:focus', sessionId) as Promise<void>,
     close: (sessionId: string) =>
       ipcRenderer.invoke('sessions:close', sessionId) as Promise<void>,
-    send: (sessionId: string, text: string) =>
-      ipcRenderer.invoke('sessions:send', sessionId, text) as Promise<void>,
+    send: (sessionId: string, text: string, attachments?: Array<{ id: string; mimeType: string; filename: string; dataUrl: string }>) =>
+      ipcRenderer.invoke('sessions:send', sessionId, text, attachments) as Promise<void>,
     launchAgentTask: (sessionId: string, input: AgentLaunchInput) =>
       ipcRenderer.invoke(
         'sessions:launchAgentTask',
