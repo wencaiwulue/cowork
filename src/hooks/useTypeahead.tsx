@@ -29,6 +29,8 @@ import { getSlackChannelSuggestions, hasSlackMcpServer } from '../utils/suggesti
 import { TEAM_LEAD_NAME } from '../utils/swarm/constants.js';
 import { applyFileSuggestion, findLongestCommonPrefix, onIndexBuildComplete, startBackgroundCacheRefresh } from './fileSuggestions.js';
 import { generateUnifiedSuggestions } from './unifiedSuggestions.js';
+import { detectComposerTrigger, applyComposerSuggestion, type ComposerTrigger } from "../utils/suggestions/composerTrigger.js";
+import { generateAtSuggestions, generateSlashSuggestions, type SuggestionGroup } from "../utils/suggestions/groupedSuggestions.js";
 
 // Unicode-aware character class for file path tokens:
 // \p{L} = letters (CJK, Latin, Cyrillic, etc.)
@@ -48,29 +50,57 @@ function isPathMetadata(metadata: unknown): metadata is {
   return typeof metadata === 'object' && metadata !== null && 'type' in metadata && (metadata.type === 'directory' || metadata.type === 'file');
 }
 
+
+/** Find the first selectable (non-group-header) index */
+function firstSelectableIndex(items: SuggestionItem[]): number {
+  for (let i = 0; i < items.length; i++) {
+    if (!items[i]?.id.startsWith('__group__') && !items[i]?.groupLabel) return i
+  }
+  return -1
+}
+
+/** Find next/prev selectable index, wrapping around, skipping group headers */
+function nextSelectableIndex(
+  items: SuggestionItem[],
+  current: number,
+  direction: 1 | -1,
+): number {
+  if (items.length === 0) return -1
+  let idx = current
+  for (let i = 0; i < items.length; i++) {
+    idx =
+      direction === 1
+        ? idx >= items.length - 1
+          ? 0
+          : idx + 1
+        : idx <= 0
+          ? items.length - 1
+          : idx - 1
+    if (!items[idx]?.id.startsWith('__group__') && !items[idx]?.groupLabel) {
+      return idx
+    }
+  }
+  return -1
+}
+
 // Helper to determine selectedSuggestion when updating suggestions
 function getPreservedSelection(prevSuggestions: SuggestionItem[], prevSelection: number, newSuggestions: SuggestionItem[]): number {
-  // No new suggestions
-  if (newSuggestions.length === 0) {
-    return -1;
-  }
+  if (newSuggestions.length === 0) return -1;
 
-  // No previous selection
-  if (prevSelection < 0) {
-    return 0;
-  }
+  if (prevSelection < 0) return firstSelectableIndex(newSuggestions);
 
-  // Get the previously selected item
   const prevSelectedItem = prevSuggestions[prevSelection];
-  if (!prevSelectedItem) {
-    return 0;
-  }
+  if (!prevSelectedItem) return firstSelectableIndex(newSuggestions);
 
-  // Try to find the same item in the new list by ID
   const newIndex = newSuggestions.findIndex(item => item.id === prevSelectedItem.id);
-
-  // Return the new index if found, otherwise default to 0
-  return newIndex >= 0 ? newIndex : 0;
+  if (newIndex >= 0) {
+    // If the found index lands on a group header, advance to next selectable
+    if (newSuggestions[newIndex]?.id.startsWith('__group__') || newSuggestions[newIndex]?.groupLabel) {
+      return nextSelectableIndex(newSuggestions, newIndex, 1)
+    }
+    return newIndex
+  }
+  return firstSelectableIndex(newSuggestions);
 }
 function buildResumeInputFromSuggestion(suggestion: SuggestionItem): string {
   const metadata = suggestion.metadata as {
@@ -434,6 +464,7 @@ export function useTypeahead({
   // Track suggestions via ref to avoid updateSuggestions being recreated on selection changes
   const suggestionsRef = useRef(suggestions);
   suggestionsRef.current = suggestions;
+  const activeComposerTriggerRef = useRef<ComposerTrigger | null>(null);
   // Track the input value when suggestions were manually dismissed to prevent re-triggering
   const dismissedForInputRef = useRef<string | null>(null);
 
@@ -538,6 +569,95 @@ export function useTypeahead({
       clearSuggestions();
       return;
     }
+
+    // === UNIFIED COMPOSER TRIGGER HANDLING ===
+    // Detect @ and / triggers and show grouped, categorized suggestion menus.
+    // This replaces the old scattered regex-based detection that had bugs
+    // (e.g., @ teammate match returning early and blocking file/agent/skill suggestions).
+    const trigger = detectComposerTrigger(value, effectiveCursorOffset)
+    activeComposerTriggerRef.current = trigger ?? null
+    if (trigger && mode !== 'bash') {
+      const { kind, query } = trigger
+      const showOnEmpty = query.length === 0
+
+      if (kind === '@') {
+        debouncedFetchFileSuggestions.cancel()
+        debouncedFetchSlackChannels.cancel()
+
+        // Gather teammates and named agents from store (read imperatively for freshness)
+        const state = store.getState()
+        const teammatesList: Array<{ name: string; color?: string; status?: string }> = []
+        const seen = new Set<string>()
+        if (isAgentSwarmsEnabled() && state.teamContext) {
+          for (const t of Object.values(state.teamContext.teammates ?? {})) {
+            const tAny = t as { name: string; color?: string }
+            if (tAny.name === TEAM_LEAD_NAME) continue
+            teammatesList.push({ name: tAny.name, color: tAny.color })
+            seen.add(tAny.name)
+          }
+        }
+        for (const [name, agentId] of state.agentNameRegistry) {
+          if (seen.has(name)) continue
+          const status = state.tasks[agentId]?.status
+          teammatesList.push({ name, status })
+          seen.add(name)
+        }
+
+        // Gather skills from prompt-type commands
+        const skillsList = commands
+          .filter(c => c.type === 'prompt' && !c.isHidden)
+          .map(c => ({
+            name: getCommandName(c),
+            description: c.description,
+            source: ('source' in c ? (c as { source?: string }).source : 'builtin') ?? 'builtin',
+          }))
+
+        try {
+          const { allItems } = await generateAtSuggestions(
+            query,
+            agents,
+            mcpResources,
+            teammatesList,
+            skillsList,
+            showOnEmpty,
+          )
+          if (allItems.length > 0) {
+            setSuggestionsState(prev => ({
+              commandArgumentHint: undefined,
+              suggestions: allItems,
+              selectedSuggestion: getPreservedSelection(prev.suggestions, prev.selectedSuggestion, allItems),
+            }))
+            setSuggestionType('composer-at')
+            setMaxColumnWidth(undefined)
+          } else {
+            clearSuggestions()
+          }
+        } catch {
+          clearSuggestions()
+        }
+        return
+      }
+
+      if (kind === '/' && trigger.start === 0) {
+        debouncedFetchFileSuggestions.cancel()
+        debouncedFetchSlackChannels.cancel()
+
+        const { allItems } = generateSlashSuggestions(query, commands)
+        if (allItems.length > 0) {
+          setSuggestionsState(() => ({
+            commandArgumentHint: undefined,
+            suggestions: allItems,
+            selectedSuggestion: firstSelectableIndex(allItems),
+          }))
+          setSuggestionType('command')
+          setMaxColumnWidth(undefined)
+        } else {
+          clearSuggestions()
+        }
+        return
+      }
+    }
+    // === END UNIFIED COMPOSER TRIGGER HANDLING ===
 
     // Check for mid-input slash command (e.g., "help me /com")
     // Only in prompt mode, not when input starts with "/" (handled separately)
@@ -939,7 +1059,7 @@ export function useTypeahead({
       // Cancel any pending debounced fetches to prevent flicker when accepting
       debouncedFetchFileSuggestions.cancel();
       debouncedFetchSlackChannels.cancel();
-      const index = selectedSuggestion === -1 ? 0 : selectedSuggestion;
+      const index = selectedSuggestion === -1 ? firstSelectableIndex(suggestions) : selectedSuggestion;
       const suggestion = suggestions[index];
       if (suggestionType === 'command' && index < suggestions.length) {
         if (suggestion) {
@@ -947,6 +1067,15 @@ export function useTypeahead({
           // don't execute on tab
           commands, onInputChange, setCursorOffset, onSubmit);
           clearSuggestions();
+        }
+      } else if (suggestionType === 'composer-at' && index < suggestions.length) {
+        const activeTrigger = activeComposerTriggerRef.current
+        if (suggestion && activeTrigger) {
+          const value = suggestion.displayText ?? ''
+          const result = applyComposerSuggestion(input, cursorOffset, activeTrigger, value)
+          onInputChange(result.input)
+          setCursorOffset(result.cursor)
+          clearSuggestions()
         }
       } else if (suggestionType === 'custom-title' && suggestions.length > 0) {
         // Apply custom title to /resume command with sessionId
@@ -1145,6 +1274,18 @@ export function useTypeahead({
         debouncedFetchFileSuggestions.cancel();
         clearSuggestions();
       }
+    } else if (suggestionType === 'composer-at' && selectedSuggestion < suggestions.length) {
+      if (suggestion) {
+        const activeTrigger = activeComposerTriggerRef.current
+        if (activeTrigger) {
+          const value = suggestion.displayText ?? ''
+          const result = applyComposerSuggestion(input, cursorOffset, activeTrigger, value)
+          onInputChange(result.input)
+          setCursorOffset(result.cursor)
+          debouncedFetchFileSuggestions.cancel()
+          clearSuggestions()
+        }
+      }
     } else if (suggestionType === 'custom-title' && selectedSuggestion < suggestions.length) {
       // Apply custom title and execute /resume command with sessionId
       if (suggestion) {
@@ -1242,17 +1383,17 @@ export function useTypeahead({
   const handleAutocompletePrevious = useCallback(() => {
     setSuggestionsState(prev => ({
       ...prev,
-      selectedSuggestion: prev.selectedSuggestion <= 0 ? suggestions.length - 1 : prev.selectedSuggestion - 1
+      selectedSuggestion: nextSelectableIndex(suggestions, prev.selectedSuggestion, -1)
     }));
-  }, [suggestions.length, setSuggestionsState]);
+  }, [suggestions, setSuggestionsState]);
 
   // Handler for autocomplete:next - selects next suggestion
   const handleAutocompleteNext = useCallback(() => {
     setSuggestionsState(prev => ({
       ...prev,
-      selectedSuggestion: prev.selectedSuggestion >= suggestions.length - 1 ? 0 : prev.selectedSuggestion + 1
+      selectedSuggestion: nextSelectableIndex(suggestions, prev.selectedSuggestion, 1)
     }));
-  }, [suggestions.length, setSuggestionsState]);
+  }, [suggestions, setSuggestionsState]);
 
   // Autocomplete context keybindings - only active when suggestions are visible
   const autocompleteHandlers = useMemo(() => ({
