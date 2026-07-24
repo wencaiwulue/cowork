@@ -1,0 +1,21 @@
+export type QuerySource =
+  | 'agent_summary'
+  | 'auto_dream'
+  | 'auto_mode_critique'
+  | 'away_summary'
+  | 'compact'
+  | 'extract_memories'
+  | 'feedback'
+  | 'hook_agent'
+  | 'magic_docs'
+  | 'memdir_relevance'
+  | 'prompt_suggestion'
+  | 'rename_generate_name'
+  | 'repl_main_thread'
+  | 'sdk'
+  | 'session_memory'
+  | 'speculation'
+  | 'tool_use_summary_generation'
+  | 'verification_agent'
+  | `agent:${string}`
+  | string

@@ -1,0 +1,826 @@
+name: Desktop Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Production semver release version
+        required: true
+        type: string
+      ux_validation_evidence_base64:
+        description: Base64-encoded completed desktop/release/ux-validation-evidence.md
+        required: false
+        type: string
+  push:
+    tags:
+      - "desktop-v*"
+
+concurrency:
+  group: desktop-release-${{ inputs.version || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  macos-release:
+    name: macOS signed release
+    runs-on: macos-14
+    environment: desktop-release
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.release-version.outputs.version }}
+      artifact-suffix: ${{ steps.release-version.outputs.artifact-suffix }}
+    env:
+      DESKTOP_RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
+      CSC_LINK: ${{ secrets.DESKTOP_MAC_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.DESKTOP_MAC_CSC_KEY_PASSWORD }}
+      CSC_NAME: ${{ secrets.DESKTOP_MAC_CSC_NAME }}
+      APPLE_API_KEY: ${{ secrets.DESKTOP_APPLE_API_KEY }}
+      APPLE_API_KEY_ID: ${{ secrets.DESKTOP_APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.DESKTOP_APPLE_API_ISSUER }}
+      APPLE_ID: ${{ secrets.DESKTOP_APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.DESKTOP_APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.DESKTOP_APPLE_TEAM_ID }}
+      APPLE_KEYCHAIN: ${{ secrets.DESKTOP_APPLE_KEYCHAIN }}
+      APPLE_KEYCHAIN_PROFILE: ${{ secrets.DESKTOP_APPLE_KEYCHAIN_PROFILE }}
+      DESKTOP_UX_VALIDATION_EVIDENCE_BASE64: ${{ inputs.ux_validation_evidence_base64 || secrets.DESKTOP_UX_VALIDATION_EVIDENCE_BASE64 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Normalize tag version
+        id: release-version
+        shell: bash
+        run: |
+          version="$DESKTOP_RELEASE_VERSION"
+          if [[ "$version" == desktop-v* ]]; then
+            version="${version#desktop-v}"
+          fi
+          release_version_delimiter="claude_release_version_$(uuidgen)"
+          {
+            printf 'DESKTOP_RELEASE_VERSION<<%s\n' "$release_version_delimiter"
+            printf '%s\n' "$version"
+            printf '%s\n' "$release_version_delimiter"
+          } >> "$GITHUB_ENV"
+          {
+            printf 'version<<%s\n' "$release_version_delimiter"
+            printf '%s\n' "$version"
+            printf '%s\n' "$release_version_delimiter"
+          } >> "$GITHUB_OUTPUT"
+          if [[ "$version" =~ ^[0-9A-Za-z._-]+$ ]]; then
+            echo "artifact-suffix=$version" >> "$GITHUB_OUTPUT"
+          else
+            echo "artifact-suffix=invalid-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve Bun version
+        id: bun-version
+        shell: bash
+        run: |
+          bun_version="$(node -e "const pm=require('./package.json').packageManager||''; const match=/^bun@(.+)$/.exec(pm); if (!match) throw new Error('packageManager must be bun@<version>'); console.log(match[1])")"
+          echo "BUN_VERSION=$bun_version" >> "$GITHUB_ENV"
+          echo "version=$bun_version" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve Node version
+        id: node-version
+        shell: bash
+        run: |
+          node_version="$(node -e "const node=require('./package.json').engines?.node||''; if (!/^\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(node)) throw new Error('engines.node must be an exact version'); console.log(node)")"
+          echo "NODE_VERSION=$node_version" >> "$GITHUB_ENV"
+          echo "version=$node_version" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ steps.bun-version.outputs.version }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.node-version.outputs.version }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run signed desktop release pipeline
+        run: bun run desktop:release-ci
+
+      - name: Archive signed app bundle
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd desktop/release
+          app_bundle="$(find . -maxdepth 2 -type d -name 'Claude Code Desktop.app' | LC_ALL=C sort | head -n 1)"
+          test -n "$app_bundle"
+          tar -czf "Claude Code Desktop-${{ steps.release-version.outputs.version }}-app-bundle.tar.gz" "$app_bundle"
+
+      - name: Upload release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-code-desktop-macos-evidence-${{ steps.release-version.outputs.artifact-suffix }}
+          retention-days: 90
+          if-no-files-found: error
+          path: |
+            desktop/release/release-evidence.json
+            desktop/release/release-notes-evidence.md
+
+      - name: Upload supplemental release diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-code-desktop-macos-diagnostics-${{ steps.release-version.outputs.artifact-suffix }}
+          retention-days: 90
+          if-no-files-found: ignore
+          path: |
+            desktop/release/ux-validation-evidence.md
+            desktop/release/SHA256SUMS
+            desktop/release/ux-screenshots/**/*.png
+
+      - name: Upload signed release artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-code-desktop-macos-artifacts-${{ steps.release-version.outputs.artifact-suffix }}
+          retention-days: 90
+          if-no-files-found: error
+          path: |
+            desktop/release/Claude Code Desktop-${{ steps.release-version.outputs.version }}-app-bundle.tar.gz
+            desktop/release/Claude Code Desktop-${{ steps.release-version.outputs.version }}-*.dmg
+            desktop/release/Claude Code Desktop-${{ steps.release-version.outputs.version }}-*-mac.zip
+
+  publish-release:
+    name: Publish GitHub release
+    needs: macos-release
+    if: success()
+    runs-on: ubuntu-latest
+    environment: desktop-release
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve Bun version
+        id: bun-version
+        shell: bash
+        run: |
+          bun_version="$(node -e "const pm=require('./package.json').packageManager||''; const match=/^bun@(.+)$/.exec(pm); if (!match) throw new Error('packageManager must be bun@<version>'); console.log(match[1])")"
+          echo "version=$bun_version" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ steps.bun-version.outputs.version }}
+
+      - name: Download signed release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: claude-code-desktop-macos-artifacts-${{ needs.macos-release.outputs.artifact-suffix }}
+          path: desktop/release/publish/artifacts
+
+      - name: Download release evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: claude-code-desktop-macos-evidence-${{ needs.macos-release.outputs.artifact-suffix }}
+          path: desktop/release/publish/evidence
+
+      - name: Download release diagnostics
+        uses: actions/download-artifact@v4
+        with:
+          name: claude-code-desktop-macos-diagnostics-${{ needs.macos-release.outputs.artifact-suffix }}
+          path: desktop/release/publish/diagnostics
+
+      - name: Verify release checksums before publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd desktop/release/publish/artifacts
+          sha256sum --check ../diagnostics/SHA256SUMS --strict
+          compgen -G "Claude Code Desktop-${{ needs.macos-release.outputs.version }}-*.dmg" >/dev/null
+          compgen -G "Claude Code Desktop-${{ needs.macos-release.outputs.version }}-*-mac.zip" >/dev/null
+
+      - name: Verify release evidence before publishing
+        shell: bash
+        env:
+          EXPECTED_RELEASE_VERSION: ${{ needs.macos-release.outputs.version }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          EXPECTED_REF_NAME: ${{ github.ref_name }}
+          EXPECTED_REF_TYPE: ${{ github.ref_type }}
+          EXPECTED_EVENT_NAME: ${{ github.event_name }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+          EXPECTED_RUN_ID: ${{ github.run_id }}
+          EXPECTED_RUN_ATTEMPT: ${{ github.run_attempt }}
+          EXPECTED_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const { createHash } = require('node:crypto')
+          const { readFileSync } = require('node:fs')
+          const { basename, join } = require('node:path')
+          function verifyEvidenceFile(label, expected, path) {
+            if (!expected || !expected.sha256 || typeof expected.sizeBytes !== 'number') {
+              throw new Error(`release evidence is missing ${label} file metadata`)
+            }
+            const contents = readFileSync(path)
+            const actualSha256 = createHash('sha256').update(contents).digest('hex')
+            if (contents.byteLength !== expected.sizeBytes || actualSha256 !== expected.sha256) {
+              throw new Error(`${label} did not match release evidence metadata`)
+            }
+          }
+          function verifyScreenshotEvidence(screenshots) {
+            if (!Array.isArray(screenshots) || screenshots.length === 0) {
+              throw new Error('release evidence is missing UX screenshot metadata')
+            }
+            for (const screenshot of screenshots) {
+              verifyEvidenceFile(
+                `UX screenshot ${basename(screenshot.path || '<missing>')}`,
+                screenshot,
+                join('desktop/release/publish/diagnostics/ux-screenshots', basename(screenshot.path || '')),
+              )
+            }
+          }
+          function requireSourceField(source, field, expected) {
+            if (String(source?.[field] || '') !== String(expected || '')) {
+              throw new Error(`release evidence source.${field} ${source?.[field] || '<missing>'} did not match ${expected || '<missing>'}`)
+            }
+          }
+          const evidencePath = 'desktop/release/publish/evidence/release-evidence.json'
+          const evidence = JSON.parse(readFileSync(evidencePath, 'utf8'))
+          const expectedVersion = process.env.EXPECTED_RELEASE_VERSION
+          if (evidence.releaseVersion !== expectedVersion) {
+            throw new Error(`release evidence version ${evidence.releaseVersion || '<missing>'} did not match ${expectedVersion}`)
+          }
+          if (evidence.evidencePurpose === 'preflight-only') {
+            throw new Error('release evidence is preflight-only and cannot be published')
+          }
+          const source = evidence.source || {}
+          requireSourceField(source, 'repository', process.env.EXPECTED_REPOSITORY)
+          requireSourceField(source, 'refName', process.env.EXPECTED_REF_NAME)
+          requireSourceField(source, 'refType', process.env.EXPECTED_REF_TYPE)
+          requireSourceField(source, 'eventName', process.env.EXPECTED_EVENT_NAME)
+          requireSourceField(source, 'commit', process.env.EXPECTED_COMMIT)
+          requireSourceField(source, 'ciRunId', process.env.EXPECTED_RUN_ID)
+          requireSourceField(source, 'ciRunAttempt', process.env.EXPECTED_RUN_ATTEMPT)
+          requireSourceField(source, 'ciRunUrl', process.env.EXPECTED_RUN_URL)
+          const steps = new Map((evidence.steps || []).map(step => [step.id, step]))
+          for (const id of ['verify-release', 'final-verify-release']) {
+            const step = steps.get(id)
+            if (!step || step.status !== 'pass' || step.exitCode !== 0) {
+              throw new Error(`${id} did not pass in release evidence`)
+            }
+          }
+          const checks = new Map((evidence.artifactVerificationChecks || []).map(check => [check.id, check]))
+          for (const id of ['mac-app-notarization', 'mac-dmg-notarization', 'mac-app-gatekeeper', 'mac-dmg-gatekeeper']) {
+            const check = checks.get(id)
+            if (!check || check.status !== 'pass') {
+              throw new Error(`${id} did not pass in release evidence`)
+            }
+          }
+          verifyEvidenceFile('checksum manifest', evidence.checksumManifest, 'desktop/release/publish/diagnostics/SHA256SUMS')
+          verifyEvidenceFile('release notes evidence', evidence.releaseNotesEvidence, 'desktop/release/publish/evidence/release-notes-evidence.md')
+          verifyEvidenceFile('UX validation evidence', evidence.uxValidationEvidence, 'desktop/release/publish/diagnostics/ux-validation-evidence.md')
+          verifyScreenshotEvidence(evidence.uxScreenshots)
+          NODE
+
+      - name: Prepare UX screenshot release evidence archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd desktop/release/publish/diagnostics
+          test -d ux-screenshots
+          find ux-screenshots -type f -name '*.png' -print0 | LC_ALL=C sort -z | xargs -0 touch -t 198001010000
+          find ux-screenshots -type f -name '*.png' | LC_ALL=C sort > ux-screenshots.files
+          test -s ux-screenshots.files
+          zip -X -q ux-screenshots.zip -@ < ux-screenshots.files
+          rm ux-screenshots.files
+
+      - name: Create draft GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: desktop-v${{ needs.macos-release.outputs.version }}
+          name: Claude Code Desktop ${{ needs.macos-release.outputs.version }}
+          body_path: desktop/release/publish/evidence/release-notes-evidence.md
+          draft: true
+          prerelease: false
+          fail_on_unmatched_files: true
+          files: |
+            desktop/release/publish/artifacts/Claude Code Desktop-${{ needs.macos-release.outputs.version }}-*.dmg
+            desktop/release/publish/artifacts/Claude Code Desktop-${{ needs.macos-release.outputs.version }}-*-mac.zip
+            desktop/release/publish/diagnostics/SHA256SUMS
+            desktop/release/publish/evidence/release-evidence.json
+            desktop/release/publish/evidence/release-notes-evidence.md
+            desktop/release/publish/diagnostics/ux-validation-evidence.md
+            desktop/release/publish/diagnostics/ux-screenshots.zip
+
+      - name: Verify draft GitHub release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_RELEASE_VERSION: ${{ needs.macos-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          release_tag="desktop-v${EXPECTED_RELEASE_VERSION}"
+          gh release view "$release_tag" \
+            --repo "${{ github.repository }}" \
+            --json tagName,name,databaseId,url,isDraft,isPrerelease,assets \
+            > desktop/release/publish/github-release.json
+          node <<'NODE'
+          const { readFileSync } = require('node:fs')
+          const release = JSON.parse(readFileSync('desktop/release/publish/github-release.json', 'utf8'))
+          const version = process.env.EXPECTED_RELEASE_VERSION
+          const expectedTag = `desktop-v${version}`
+          const expectedName = `Claude Code Desktop ${version}`
+          if (release.tagName !== expectedTag) {
+            throw new Error(`published release tag ${release.tagName || '<missing>'} did not match ${expectedTag}`)
+          }
+          if (release.name !== expectedName) {
+            throw new Error(`published release name ${release.name || '<missing>'} did not match ${expectedName}`)
+          }
+          if (!release.isDraft || release.isPrerelease) {
+            throw new Error('release must remain draft and not prerelease until the final production gate passes')
+          }
+          const assetNames = (release.assets || []).map(asset => asset.name).filter(Boolean)
+          const duplicateAssetNames = assetNames.filter((name, index) => assetNames.indexOf(name) !== index)
+          if (duplicateAssetNames.length > 0) {
+            throw new Error(`published release has duplicate asset names: ${[...new Set(duplicateAssetNames)].join(', ')}`)
+          }
+          function escapeRegExp(value) {
+            return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+          }
+          function requireExactAsset(name) {
+            if (!assetNames.includes(name)) {
+              throw new Error(`published release is missing asset ${name}`)
+            }
+          }
+          function requireMatchingAsset(label, pattern) {
+            if (!assetNames.some(name => pattern.test(name))) {
+              throw new Error(`published release is missing ${label}`)
+            }
+          }
+          const escapedVersion = escapeRegExp(version)
+          requireMatchingAsset('current-version DMG asset', new RegExp(`^Claude Code Desktop-${escapedVersion}-.+\\.dmg$`))
+          requireMatchingAsset('current-version mac ZIP asset', new RegExp(`^Claude Code Desktop-${escapedVersion}-.+-mac\\.zip$`))
+          for (const assetName of [
+            'SHA256SUMS',
+            'release-evidence.json',
+            'release-notes-evidence.md',
+            'ux-validation-evidence.md',
+            'ux-screenshots.zip',
+          ]) {
+            requireExactAsset(assetName)
+          }
+          NODE
+
+      - name: Verify published GitHub release downloads
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_RELEASE_VERSION: ${{ needs.macos-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          release_tag="desktop-v${EXPECTED_RELEASE_VERSION}"
+          rm -rf desktop/release/publish/downloaded
+          mkdir -p desktop/release/publish/downloaded
+          gh release download "$release_tag" \
+            --repo "${{ github.repository }}" \
+            --dir desktop/release/publish/downloaded \
+            --clobber
+          node <<'NODE'
+          const { createHash } = require('node:crypto')
+          const { readdirSync, readFileSync, statSync } = require('node:fs')
+          const { basename, join } = require('node:path')
+          function escapeRegExp(value) {
+            return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+          }
+          function sha256(path) {
+            return createHash('sha256').update(readFileSync(path)).digest('hex')
+          }
+          function findOneFile(dir, pattern, label) {
+            const matches = readdirSync(dir)
+              .filter(name => pattern.test(name))
+              .sort()
+            if (matches.length !== 1) {
+              throw new Error(`${label} expected exactly one match, found ${matches.length}`)
+            }
+            return join(dir, matches[0])
+          }
+          const version = process.env.EXPECTED_RELEASE_VERSION
+          const escapedVersion = escapeRegExp(version)
+          const artifactsDir = 'desktop/release/publish/artifacts'
+          const diagnosticsDir = 'desktop/release/publish/diagnostics'
+          const evidenceDir = 'desktop/release/publish/evidence'
+          const downloadedDir = 'desktop/release/publish/downloaded'
+          const localDmg = findOneFile(artifactsDir, new RegExp(`^Claude Code Desktop-${escapedVersion}-.+\\.dmg$`), 'local DMG')
+          const localZip = findOneFile(artifactsDir, new RegExp(`^Claude Code Desktop-${escapedVersion}-.+-mac\\.zip$`), 'local mac ZIP')
+          const expectedFiles = new Map([
+            [basename(localDmg), localDmg],
+            [basename(localZip), localZip],
+            ['SHA256SUMS', join(diagnosticsDir, 'SHA256SUMS')],
+            ['release-evidence.json', join(evidenceDir, 'release-evidence.json')],
+            ['release-notes-evidence.md', join(evidenceDir, 'release-notes-evidence.md')],
+            ['ux-validation-evidence.md', join(diagnosticsDir, 'ux-validation-evidence.md')],
+            ['ux-screenshots.zip', join(diagnosticsDir, 'ux-screenshots.zip')],
+          ])
+          const expectedNames = [...expectedFiles.keys()].sort()
+          const downloadedNames = readdirSync(downloadedDir).sort()
+          const missing = expectedNames.filter(name => !downloadedNames.includes(name))
+          const unexpected = downloadedNames.filter(name => !expectedFiles.has(name))
+          if (missing.length > 0 || unexpected.length > 0) {
+            throw new Error(`downloaded release assets mismatch; missing=${missing.join(', ') || '<none>'}; unexpected=${unexpected.join(', ') || '<none>'}`)
+          }
+          for (const [assetName, localPath] of expectedFiles) {
+            const downloadedPath = join(downloadedDir, assetName)
+            const localSize = statSync(localPath).size
+            const downloadedSize = statSync(downloadedPath).size
+            if (localSize !== downloadedSize) {
+              throw new Error(`${assetName} downloaded size ${downloadedSize} did not match local size ${localSize}`)
+            }
+            const localSha256 = sha256(localPath)
+            const downloadedSha256 = sha256(downloadedPath)
+            if (localSha256 !== downloadedSha256) {
+              throw new Error(`${assetName} downloaded SHA-256 ${downloadedSha256} did not match local SHA-256 ${localSha256}`)
+            }
+          }
+          NODE
+
+      - name: Publish post-publish release evidence
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_RELEASE_VERSION: ${{ needs.macos-release.outputs.version }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          EXPECTED_REF_NAME: ${{ github.ref_name }}
+          EXPECTED_REF_TYPE: ${{ github.ref_type }}
+          EXPECTED_EVENT_NAME: ${{ github.event_name }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+          EXPECTED_RUN_ID: ${{ github.run_id }}
+          EXPECTED_RUN_ATTEMPT: ${{ github.run_attempt }}
+          EXPECTED_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          release_tag="desktop-v${EXPECTED_RELEASE_VERSION}"
+          bun run desktop:write-published-release-evidence
+          gh release upload "$release_tag" \
+            desktop/release/publish/published-release-evidence.json \
+            --repo "${{ github.repository }}" \
+            --clobber
+          rm -rf desktop/release/publish/downloaded-evidence
+          mkdir -p desktop/release/publish/downloaded-evidence
+          gh release download "$release_tag" \
+            --repo "${{ github.repository }}" \
+            --pattern published-release-evidence.json \
+            --dir desktop/release/publish/downloaded-evidence \
+            --clobber
+          bun run desktop:verify-published-release
+
+      - name: Upload published release evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-code-desktop-published-evidence-${{ needs.macos-release.outputs.artifact-suffix }}
+          retention-days: 90
+          if-no-files-found: error
+          path: desktop/release/publish/published-release-evidence.json
+
+  production-gate:
+    name: Final production gate
+    needs: [macos-release, publish-release]
+    if: success()
+    runs-on: macos-14
+    environment: desktop-release
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      DESKTOP_RELEASE_VERSION: ${{ needs.macos-release.outputs.version }}
+      CSC_LINK: ${{ secrets.DESKTOP_MAC_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.DESKTOP_MAC_CSC_KEY_PASSWORD }}
+      CSC_NAME: ${{ secrets.DESKTOP_MAC_CSC_NAME }}
+      APPLE_API_KEY: ${{ secrets.DESKTOP_APPLE_API_KEY }}
+      APPLE_API_KEY_ID: ${{ secrets.DESKTOP_APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.DESKTOP_APPLE_API_ISSUER }}
+      APPLE_ID: ${{ secrets.DESKTOP_APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.DESKTOP_APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.DESKTOP_APPLE_TEAM_ID }}
+      APPLE_KEYCHAIN: ${{ secrets.DESKTOP_APPLE_KEYCHAIN }}
+      APPLE_KEYCHAIN_PROFILE: ${{ secrets.DESKTOP_APPLE_KEYCHAIN_PROFILE }}
+      DESKTOP_UX_VALIDATION_EVIDENCE_PATH: desktop/release/ux-validation-evidence.md
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve Bun version
+        id: bun-version
+        shell: bash
+        run: |
+          bun_version="$(node -e "const pm=require('./package.json').packageManager||''; const match=/^bun@(.+)$/.exec(pm); if (!match) throw new Error('packageManager must be bun@<version>'); console.log(match[1])")"
+          echo "BUN_VERSION=$bun_version" >> "$GITHUB_ENV"
+          echo "version=$bun_version" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve Node version
+        id: node-version
+        shell: bash
+        run: |
+          node_version="$(node -e "const node=require('./package.json').engines?.node||''; if (!/^\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(node)) throw new Error('engines.node must be an exact version'); console.log(node)")"
+          echo "NODE_VERSION=$node_version" >> "$GITHUB_ENV"
+          echo "version=$node_version" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ steps.bun-version.outputs.version }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.node-version.outputs.version }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Download signed release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: claude-code-desktop-macos-artifacts-${{ needs.macos-release.outputs.artifact-suffix }}
+          path: desktop/release
+
+      - name: Restore signed app bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd desktop/release
+          app_bundle_archive="$(find . -maxdepth 1 -type f -name 'Claude Code Desktop-${{ needs.macos-release.outputs.version }}-app-bundle.tar.gz' | LC_ALL=C sort | head -n 1)"
+          test -n "$app_bundle_archive"
+          tar -xzf "$app_bundle_archive"
+          restored_app="$(find . -maxdepth 2 -type d -name 'Claude Code Desktop.app' | LC_ALL=C sort | head -n 1)"
+          test -n "$restored_app"
+
+      - name: Download release evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: claude-code-desktop-macos-evidence-${{ needs.macos-release.outputs.artifact-suffix }}
+          path: desktop/release
+
+      - name: Download release diagnostics
+        uses: actions/download-artifact@v4
+        with:
+          name: claude-code-desktop-macos-diagnostics-${{ needs.macos-release.outputs.artifact-suffix }}
+          path: desktop/release
+
+      - name: Download local published release evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: claude-code-desktop-published-evidence-${{ needs.macos-release.outputs.artifact-suffix }}
+          path: desktop/release/publish
+
+      - name: Download published release assets for final gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_RELEASE_VERSION: ${{ needs.macos-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          release_tag="desktop-v${EXPECTED_RELEASE_VERSION}"
+          rm -rf desktop/release/publish/downloaded desktop/release/publish/downloaded-evidence
+          mkdir -p desktop/release/publish/downloaded desktop/release/publish/downloaded-evidence
+          for pattern in \
+            "Claude Code Desktop-${EXPECTED_RELEASE_VERSION}-*.dmg" \
+            "Claude Code Desktop-${EXPECTED_RELEASE_VERSION}-*-mac.zip" \
+            "SHA256SUMS" \
+            "release-evidence.json" \
+            "release-notes-evidence.md" \
+            "ux-validation-evidence.md" \
+            "ux-screenshots.zip"
+          do
+            gh release download "$release_tag" \
+              --repo "${{ github.repository }}" \
+              --pattern "$pattern" \
+              --dir desktop/release/publish/downloaded \
+              --clobber
+          done
+          gh release download "$release_tag" \
+            --repo "${{ github.repository }}" \
+            --pattern published-release-evidence.json \
+            --dir desktop/release/publish/downloaded-evidence \
+            --clobber
+
+      - name: Run final production gate
+        run: bun run desktop:production-gate
+
+      - name: Verify production gate evidence
+        if: always()
+        run: |
+          node desktop/scripts/production-gate.mjs verify \
+            --evidence desktop/release/production-gate-evidence.json \
+            --published-evidence desktop/release/publish/downloaded-evidence/published-release-evidence.json
+
+      - name: Upload production gate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-code-desktop-production-gate-evidence-${{ needs.macos-release.outputs.artifact-suffix }}
+          retention-days: 90
+          if-no-files-found: error
+          path: desktop/release/production-gate-evidence.json
+
+  publish-public-release:
+    name: Publish public GitHub release
+    needs: [macos-release, production-gate]
+    if: success()
+    runs-on: ubuntu-latest
+    environment: desktop-release
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve Bun version
+        id: bun-version
+        shell: bash
+        run: |
+          bun_version="$(node -e "const pm=require('./package.json').packageManager||''; const match=/^bun@(.+)$/.exec(pm); if (!match) throw new Error('packageManager must be bun@<version>'); console.log(match[1])")"
+          echo "version=$bun_version" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ steps.bun-version.outputs.version }}
+
+      - name: Download production gate evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: claude-code-desktop-production-gate-evidence-${{ needs.macos-release.outputs.artifact-suffix }}
+          path: public-release-input
+
+      - name: Download published release evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: claude-code-desktop-published-evidence-${{ needs.macos-release.outputs.artifact-suffix }}
+          path: public-release-input/published-evidence
+
+      - name: Verify downloaded production gate evidence
+        run: node desktop/scripts/production-gate.mjs verify --evidence public-release-input/production-gate-evidence.json --published-evidence public-release-input/published-evidence/published-release-evidence.json
+
+      - name: Publish verified release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_RELEASE_VERSION: ${{ needs.macos-release.outputs.version }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          EXPECTED_REF_NAME: ${{ github.ref_name }}
+          EXPECTED_REF_TYPE: ${{ github.ref_type }}
+          EXPECTED_EVENT_NAME: ${{ github.event_name }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+          EXPECTED_RUN_ID: ${{ github.run_id }}
+          EXPECTED_RUN_ATTEMPT: ${{ github.run_attempt }}
+          EXPECTED_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          release_tag="desktop-v${EXPECTED_RELEASE_VERSION}"
+          gh release upload "$release_tag" \
+            public-release-input/production-gate-evidence.json \
+            --repo "${{ github.repository }}" \
+            --clobber
+          rm -rf public-release-output/downloaded-gate-evidence
+          mkdir -p public-release-output/downloaded-gate-evidence
+          gh release download "$release_tag" \
+            --repo "${{ github.repository }}" \
+            --pattern production-gate-evidence.json \
+            --dir public-release-output/downloaded-gate-evidence \
+            --clobber
+          node <<'NODE'
+          const { createHash } = require('node:crypto')
+          const { readFileSync, statSync } = require('node:fs')
+          function sha256(path) {
+            return createHash('sha256').update(readFileSync(path)).digest('hex')
+          }
+          const localPath = 'public-release-input/production-gate-evidence.json'
+          const downloadedPath = 'public-release-output/downloaded-gate-evidence/production-gate-evidence.json'
+          const localSize = statSync(localPath).size
+          const downloadedSize = statSync(downloadedPath).size
+          if (localSize !== downloadedSize) {
+            throw new Error(`uploaded production-gate-evidence.json size ${downloadedSize} did not match local size ${localSize}`)
+          }
+          const localSha256 = sha256(localPath)
+          const downloadedSha256 = sha256(downloadedPath)
+          if (localSha256 !== downloadedSha256) {
+            throw new Error(`uploaded production-gate-evidence.json SHA-256 ${downloadedSha256} did not match local SHA-256 ${localSha256}`)
+          }
+          NODE
+          gh release edit "$release_tag" \
+            --repo "${{ github.repository }}" \
+            --draft=false \
+            --prerelease=false
+          gh release view "$release_tag" \
+            --repo "${{ github.repository }}" \
+            --json tagName,name,databaseId,url,isDraft,isPrerelease,assets \
+            > public-release.json
+          node <<'NODE'
+          const { readFileSync } = require('node:fs')
+          const release = JSON.parse(readFileSync('public-release.json', 'utf8'))
+          const version = process.env.EXPECTED_RELEASE_VERSION
+          const expectedTag = `desktop-v${version}`
+          const expectedName = `Claude Code Desktop ${version}`
+          if (release.tagName !== expectedTag || release.name !== expectedName) {
+            throw new Error(`public release identity mismatch: tag=${release.tagName || '<missing>'} name=${release.name || '<missing>'}`)
+          }
+          if (release.isDraft || release.isPrerelease) {
+            throw new Error('public release must not be draft or prerelease')
+          }
+          const assetNames = (release.assets || []).map(asset => asset.name).filter(Boolean)
+          function escapeRegExp(value) {
+            return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+          }
+          function requireExactAsset(name) {
+            if (!assetNames.includes(name)) {
+              throw new Error(`public release is missing asset ${name}`)
+            }
+          }
+          function requireMatchingAsset(label, pattern) {
+            if (!assetNames.some(name => pattern.test(name))) {
+              throw new Error(`public release is missing ${label}`)
+            }
+          }
+          const escapedVersion = escapeRegExp(version)
+          requireMatchingAsset('current-version DMG asset', new RegExp(`^Claude Code Desktop-${escapedVersion}-.+\\.dmg$`))
+          requireMatchingAsset('current-version mac ZIP asset', new RegExp(`^Claude Code Desktop-${escapedVersion}-.+-mac\\.zip$`))
+          for (const assetName of [
+            'SHA256SUMS',
+            'release-evidence.json',
+            'release-notes-evidence.md',
+            'ux-validation-evidence.md',
+            'ux-screenshots.zip',
+            'production-gate-evidence.json',
+            'published-release-evidence.json',
+          ]) {
+            requireExactAsset(assetName)
+          }
+          NODE
+          rm -rf public-release-output/downloaded-public-release
+          mkdir -p public-release-output/downloaded-public-release
+          gh release download "$release_tag" \
+            --repo "${{ github.repository }}" \
+            --dir public-release-output/downloaded-public-release \
+            --clobber
+          node <<'NODE'
+          const { createHash } = require('node:crypto')
+          const { readdirSync, readFileSync, statSync } = require('node:fs')
+          const { join } = require('node:path')
+          function sha256(path) {
+            return createHash('sha256').update(readFileSync(path)).digest('hex')
+          }
+          function fileSummary(path) {
+            return {
+              sizeBytes: statSync(path).size,
+              sha256: sha256(path),
+            }
+          }
+          const downloadedDir = 'public-release-output/downloaded-public-release'
+          const publishedEvidencePath = 'public-release-input/published-evidence/published-release-evidence.json'
+          const publishedEvidence = JSON.parse(readFileSync(publishedEvidencePath, 'utf8'))
+          const expectedAssets = new Map()
+          for (const asset of publishedEvidence.verifiedAssets || []) {
+            expectedAssets.set(asset.name, {
+              sizeBytes: asset.sizeBytes,
+              sha256: asset.sha256,
+            })
+          }
+          expectedAssets.set('production-gate-evidence.json', fileSummary('public-release-input/production-gate-evidence.json'))
+          expectedAssets.set('published-release-evidence.json', fileSummary(publishedEvidencePath))
+          const expectedNames = [...expectedAssets.keys()].sort()
+          const downloadedNames = readdirSync(downloadedDir).sort()
+          const missing = expectedNames.filter(name => !downloadedNames.includes(name))
+          const unexpected = downloadedNames.filter(name => !expectedAssets.has(name))
+          if (missing.length > 0 || unexpected.length > 0) {
+            throw new Error(`final public release assets mismatch; missing=${missing.join(', ') || '<none>'}; unexpected=${unexpected.join(', ') || '<none>'}`)
+          }
+          for (const [assetName, expected] of expectedAssets) {
+            const downloadedPath = join(downloadedDir, assetName)
+            const downloadedSize = statSync(downloadedPath).size
+            if (downloadedSize !== expected.sizeBytes) {
+              throw new Error(`final public asset size ${downloadedSize} did not match expected size ${expected.sizeBytes}: ${assetName}`)
+            }
+            const downloadedSha256 = sha256(downloadedPath)
+            if (downloadedSha256 !== expected.sha256) {
+              throw new Error(`final public asset SHA-256 ${downloadedSha256} did not match expected SHA-256 ${expected.sha256}: ${assetName}`)
+            }
+          }
+          NODE
+          bun run desktop:write-public-release-evidence
+          bun run desktop:verify-public-release
+          node desktop/scripts/published-release-evidence.mjs verify-public \
+            --evidence public-release-evidence.json \
+            --production-gate-evidence public-release-input/production-gate-evidence.json \
+            --published-evidence public-release-input/published-evidence/published-release-evidence.json
+
+      - name: Upload public release evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-code-desktop-public-release-evidence-${{ needs.macos-release.outputs.artifact-suffix }}
+          retention-days: 90
+          if-no-files-found: error
+          path: public-release-evidence.json
