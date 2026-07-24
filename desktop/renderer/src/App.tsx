@@ -377,6 +377,26 @@ type PaneStatus = {
   kind: 'info' | 'success' | 'error'
   text: string
 }
+
+type RpcMessage = {
+  id: string
+  sessionId: string
+  timestamp: number
+  direction: 'incoming' | 'outgoing'
+  type: string
+  subtype?: string
+  raw: unknown
+  parsed?: {
+    messageType?: string
+    toolName?: string
+    isToolUse?: boolean
+    isToolResult?: boolean
+    content?: string
+    thinking?: string
+  }
+}
+
+
 type ScheduledTaskStatusTarget = 'tasks' | 'settings'
 type SessionStatus = {
   kind: 'info' | 'success' | 'error'
@@ -1113,6 +1133,70 @@ function isValidCronPart(part: string, min: number, max: number): boolean {
   return false
 }
 
+
+function extractRpcMessageInfo(raw: unknown): RpcMessage['parsed'] {
+  if (!raw || typeof raw !== 'object') return undefined
+  const msg = raw as Record<string, unknown>
+  const result: NonNullable<RpcMessage['parsed']> = {}
+  
+  const type = typeof msg.type === 'string' ? msg.type : undefined
+  result.messageType = type
+  
+  // Tool use detection
+  const event = msg.event as Record<string, unknown> | undefined
+  const contentBlock = event?.content_block as Record<string, unknown> | undefined
+  if (type === 'stream_event' && event?.type === 'content_block_start') {
+    if (contentBlock?.type === 'tool_use' || contentBlock?.type === 'server_tool_use' || contentBlock?.type === 'mcp_tool_use') {
+      result.isToolUse = true
+      result.toolName = typeof contentBlock.name === 'string' ? contentBlock.name : undefined
+    }
+  }
+  
+  // Tool result detection
+  if (type === 'stream_event' && event?.type === 'content_block_delta') {
+    const delta = event.delta as Record<string, unknown> | undefined
+    if (delta?.type === 'input_json_delta') {
+      result.isToolUse = true
+    }
+  }
+  
+  if (type === 'system' || type === 'system_init') {
+    result.content = typeof msg.message === 'string' ? msg.message : JSON.stringify(msg.message)
+  }
+  
+  // Extract assistant/tool message text
+  if (type === 'assistant' || type === 'user' || type === 'tool') {
+    const message = msg.message as Record<string, unknown> | undefined
+    if (message?.content) {
+      if (typeof message.content === 'string') {
+        result.content = message.content
+      } else if (Array.isArray(message.content)) {
+        result.content = message.content
+          .map((c: Record<string, unknown>) => {
+            if (c.type === 'text' && typeof c.text === 'string') return c.text
+            if (c.type === 'thinking' && typeof c.thinking === 'string') {
+              result.thinking = (result.thinking ?? '') + c.thinking
+              return `[thinking]`
+            }
+            if (c.type === 'tool_use') {
+              result.isToolUse = true
+              result.toolName = typeof c.name === 'string' ? c.name : result.toolName
+              return `[tool: ${c.name ?? 'unknown'}]`
+            }
+            return ''
+          })
+          .filter(Boolean)
+          .join('\n')
+      }
+    }
+    if (typeof msg.result === 'string') {
+      result.content = msg.result
+    }
+  }
+  
+  return result
+}
+
 function emptyMcpDraft(): McpDraft {
   return {
     scope: 'user',
@@ -1469,6 +1553,10 @@ export function App() {
   const [skillsActiveSection, setSkillsActiveSection] = useState('skills-installed')
   const [mcpSearch, setMcpSearch] = useState('')
   const [skillsSearch, setSkillsSearch] = useState('')
+  const [rpcMessages, setRpcMessages] = useState<RpcMessage[]>([])
+  const [rpcMessageFilter, setRpcMessageFilter] = useState<'all' | 'tool' | 'message' | 'system'>('all')
+  const [selectedRpcMessage, setSelectedRpcMessage] = useState<RpcMessage>()
+  const rpcMessageIdRef = useRef(0)
   const [desktopConfig, setDesktopConfig] = useState<ClaudeDesktopConfig>()
   const desktopConfigRef = useRef<ClaudeDesktopConfig | undefined>(undefined)
   const [projectTasks, setProjectTasks] = useState<ProjectScheduledTaskInfo[]>([])
@@ -2719,6 +2807,28 @@ export function App() {
         )
       }
       if (event.type === 'runtime-message') {
+        // Capture all incoming RPC messages
+        const msgRaw = event.message as Record<string, unknown>
+        const msgType = typeof msgRaw?.type === 'string' ? msgRaw.type : 'unknown'
+        const msgSubtype = typeof msgRaw?.subtype === 'string' ? msgRaw.subtype : undefined
+        rpcMessageIdRef.current += 1
+        const rpcMessage: RpcMessage = {
+          id: `rpc-${rpcMessageIdRef.current}-${Date.now().toString(36)}`,
+          sessionId: event.sessionId,
+          timestamp: Date.now(),
+          direction: 'incoming',
+          type: msgType,
+          subtype: msgSubtype,
+          raw: event.message,
+          parsed: extractRpcMessageInfo(event.message),
+        }
+        setRpcMessages(prev => {
+          const next = [...prev, rpcMessage]
+          // Keep last 1000 messages per session to avoid memory bloat
+          if (next.length > 2000) return next.slice(-1500)
+          return next
+        })
+
         const request = normalizePermissionRequest({
           sessionId: event.sessionId,
           message: event.message,
@@ -10753,6 +10863,7 @@ export function App() {
                       <button {...paneJumpbarButtonState(agentsActiveSection === 'agents-launch')} onClick={handleAgentsLaunchSectionClick}>Run</button>
                       <button {...paneJumpbarButtonState(agentsActiveSection === 'agents-editor')} onClick={handleAgentsEditorSectionClick}>Custom</button>
                       <button {...paneJumpbarButtonState(agentsActiveSection === 'agents-tasks')} onClick={handleAgentsTasksSectionClick}>Running</button>
+                      <button {...paneJumpbarButtonState(agentsActiveSection === 'agents-activity')} onClick={handleAgentsActivitySectionClick}>Activity</button>
                     </>
                   )}
                 </nav>
@@ -11284,6 +11395,139 @@ export function App() {
                           ))}
                         </div>
                       ) : null}
+
+                    <section className="settings-section" id="agents-activity">
+                      <h3>RPC Activity & Agent Steps</h3>
+                      <p className="section-copy">All JSON-RPC messages and agent execution steps captured in real-time from the runtime session.</p>
+                      <div className="activity-toolbar">
+                        <div className="filter-tabs">
+                          <button 
+                            className={rpcMessageFilter === 'all' ? 'active' : ''} 
+                            onClick={() => setRpcMessageFilter('all')}
+                            disabled={!!loadingLabel}
+                          >
+                            All ({rpcMessages.length})
+                          </button>
+                          <button 
+                            className={rpcMessageFilter === 'tool' ? 'active' : ''} 
+                            onClick={() => setRpcMessageFilter('tool')}
+                            disabled={!!loadingLabel}
+                          >
+                            Tools
+                          </button>
+                          <button 
+                            className={rpcMessageFilter === 'message' ? 'active' : ''} 
+                            onClick={() => setRpcMessageFilter('message')}
+                            disabled={!!loadingLabel}
+                          >
+                            Messages
+                          </button>
+                          <button 
+                            className={rpcMessageFilter === 'system' ? 'active' : ''} 
+                            onClick={() => setRpcMessageFilter('system')}
+                            disabled={!!loadingLabel}
+                          >
+                            System
+                          </button>
+                        </div>
+                        <button 
+                          className="tool-button" 
+                          onClick={() => { setRpcMessages([]); setSelectedRpcMessage(undefined) }}
+                          disabled={!!loadingLabel || rpcMessages.length === 0}
+                        >
+                          <Icon name="trash" />Clear
+                        </button>
+                      </div>
+                      <div className="activity-layout">
+                        <div className="activity-timeline" role="log" aria-label="RPC message timeline">
+                          {(() => {
+                            const sessionMessages = activeSessionId ? rpcMessages.filter(msg => msg.sessionId === activeSessionId) : rpcMessages
+                            if (sessionMessages.length === 0) {
+                            return (
+                            <div className="workarea-empty settings-empty-state">
+                              <Icon name="terminal" />
+                              <strong>No RPC activity yet</strong>
+                              <span>Start a chat session or run an agent to capture JSON-RPC messages here.</span>
+                            </div>
+                            )}
+                            const filtered = sessionMessages.filter(msg => {
+                              if (rpcMessageFilter === 'all') return true
+                              if (rpcMessageFilter === 'tool') return msg.parsed?.isToolUse || msg.type.includes('tool')
+                              if (rpcMessageFilter === 'message') return ['user', 'assistant', 'tool'].includes(msg.type)
+                              if (rpcMessageFilter === 'system') return msg.type === 'system' || msg.type === 'system_init' || msg.type === 'stream_event'
+                              return true
+                            })
+                            const reversed = [...filtered].reverse()
+                            return reversed.map(msg => {
+                              const time = new Date(msg.timestamp).toLocaleTimeString()
+                              const isSelected = selectedRpcMessage?.id === msg.id
+                              const isTool = msg.parsed?.isToolUse
+                              const typeLabel = msg.subtype ? `${msg.type}/${msg.subtype}` : msg.type
+                              let label = msg.parsed?.toolName 
+                                ? `🔧 ${msg.parsed.toolName}` 
+                                : msg.parsed?.content?.slice(0, 80)?.replace(/\n/g, ' ') ?? typeLabel
+                              if (msg.parsed?.thinking) label = `💭 ${label}`
+                              return (
+                                <button
+                                  key={msg.id}
+                                  className={`activity-item ${isSelected ? 'selected' : ''} ${isTool ? 'tool-event' : ''}`}
+                                  onClick={() => setSelectedRpcMessage(msg)}
+                                  aria-selected={isSelected}
+                                >
+                                  <span className="activity-time">{time}</span>
+                                  <span className="activity-type">{typeLabel}</span>
+                                  <span className="activity-label">{label}</span>
+                                </button>
+                              )
+                            })
+                          })()}
+                        </div>
+                        <div className="activity-detail">
+                          {selectedRpcMessage ? (
+                            <div>
+                              <div className="activity-detail-header">
+                                <strong>Message Details</strong>
+                                <small>{new Date(selectedRpcMessage.timestamp).toLocaleString()}</small>
+                              </div>
+                              <div className="activity-meta">
+                                <div><small>Type</small><code>{selectedRpcMessage.type}</code></div>
+                                {selectedRpcMessage.subtype && <div><small>Subtype</small><code>{selectedRpcMessage.subtype}</code></div>}
+                                <div><small>Session</small><code>{selectedRpcMessage.sessionId.slice(0, 12)}...</code></div>
+                                <div><small>Direction</small><code>{selectedRpcMessage.direction}</code></div>
+                              </div>
+                              {selectedRpcMessage.parsed?.toolName && (
+                                <div className="activity-parsed">
+                                  <small>Tool call</small>
+                                  <strong>{selectedRpcMessage.parsed.toolName}</strong>
+                                </div>
+                              )}
+                              {selectedRpcMessage.parsed?.content && (
+                                <div className="activity-parsed">
+                                  <small>Content preview</small>
+                                  <pre>{selectedRpcMessage.parsed.content}</pre>
+                                </div>
+                              )}
+                              {selectedRpcMessage.parsed?.thinking && (
+                                <div className="activity-parsed thinking">
+                                  <small>Thinking</small>
+                                  <pre>{selectedRpcMessage.parsed.thinking}</pre>
+                                </div>
+                              )}
+                              <div className="activity-raw">
+                                <small>Raw JSON-RPC payload</small>
+                                <pre>{JSON.stringify(selectedRpcMessage.raw, null, 2)}</pre>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="workarea-empty settings-empty-state">
+                              <Icon name="search" />
+                              <strong>Select a message</strong>
+                              <span>Click on a timeline item to inspect full raw JSON-RPC data.</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </section>
                     </section>
                   </>
                 )}
