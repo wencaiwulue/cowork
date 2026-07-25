@@ -3754,3 +3754,133 @@ button:focus-visible {
 .goal-bar-actions .tool-button:hover {
   background: rgba(255, 112, 67, 0.12);
 }
+
+/* ==========================================================================
+   DARK THEME
+   ========================================================================== */
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1a1816;
+  --surface: #23211f;
+  --surface-2: #2d2a27;
+  --surface-3: #3a3632;
+  --text: #e8e4df;
+  --muted: #9a9388;
+  --hairline: #3a3632;
+  --accent: #d4805a;
+  --accent-strong: #e08a64;
+  --blue: #7a92e0;
+  --green: #5cbf74;
+  --red: #e0716f;
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --scrollbar-thumb: rgba(154, 147, 136, 0.35);
+  --scrollbar-thumb-hover: rgba(154, 147, 136, 0.55);
+  --scrollbar-track: rgba(26, 24, 22, 0.6);
+  --chat-user-bg: #2d2a27;
+  --chat-assistant-bg: transparent;
+  --sidebar-bg: #1e1c1a;
+  --sidebar-hover: #2a2724;
+  --sidebar-active: #33302c;
+}
+
+[data-theme="dark"] body {
+  background: var(--bg);
+}
+
+/* Surface overrides for hardcoded colors */
+[data-theme="dark"] .desktop-shell { background: var(--bg); }
+[data-theme="dark"] .session-rail { background: var(--sidebar-bg); border-right-color: var(--hairline); }
+[data-theme="dark"] .chat-pane { background: var(--bg); }
+[data-theme="dark"] .chat-header { border-bottom-color: var(--hairline); }
+[data-theme="dark"] .composer { background: transparent; }
+[data-theme="dark"] .composer textarea {
+  background: var(--surface);
+  border-color: var(--hairline);
+  color: var(--text);
+  box-shadow: 0 0 0 1px var(--hairline);
+}
+[data-theme="dark"] .composer textarea:focus {
+  border-color: var(--surface-3);
+  box-shadow: 0 0 0 1px var(--surface-3), 0 4px 16px rgba(0,0,0,0.3);
+}
+[data-theme="dark"] .message-list { background: var(--bg); }
+[data-theme="dark"] .message-plain,
+[data-theme="dark"] .message-markdown { color: var(--text); }
+[data-theme="dark"] .message-code-block { background: var(--surface-2); border-color: var(--hairline); }
+[data-theme="dark"] .conversation-activity { /* hidden anyway */ }
+[data-theme="dark"] .plan-approval-bar {
+  background: linear-gradient(135deg, #1a2e1a, #1f2e17);
+  border-color: #3d5c3d;
+}
+[data-theme="dark"] .plan-approval-content { color: #81c784; }
+[data-theme="dark"] .goal-bar {
+  background: linear-gradient(135deg, #2e2418, #2e2817);
+  border-color: #5c4a2f;
+}
+[data-theme="dark"] .goal-bar-text strong { color: #ffb74d; }
+[data-theme="dark"] .goal-bar-text span { color: #d7ccc0; }
+[data-theme="dark"] .goal-bar-content > svg { color: #ffb74d; }
+[data-theme="dark"] .primary-nav button:hover,
+[data-theme="dark"] .rail-footer button:hover,
+[data-theme="dark"] .rail-section-toggle:hover { background: var(--sidebar-hover); }
+[data-theme="dark"] .primary-nav button.active,
+[data-theme="dark"] .rail-footer button.active { background: var(--sidebar-active); color: var(--text); }
+[data-theme="dark"] .session-row-shell:hover { background: var(--sidebar-hover); }
+[data-theme="dark"] .session-row.active { background: var(--sidebar-active); }
+[data-theme="dark"] .new-chat-button { border-color: var(--hairline); color: var(--text); background: transparent; }
+[data-theme="dark"] .new-chat-button:hover { background: var(--sidebar-hover); }
+[data-theme="dark"] .pane-tabs { background: var(--surface-2); border-bottom-color: var(--hairline); }
+[data-theme="dark"] .pane-tabs button.active,
+[data-theme="dark"] .pane-tabs button:hover { background: var(--surface); color: var(--text); }
+[data-theme="dark"] .activity-card { background: var(--surface); border-color: var(--hairline); box-shadow: var(--shadow-soft); }
+[data-theme="dark"] .settings-section { color: var(--text); }
+[data-theme="dark"] input,
+[data-theme="dark"] textarea,
+[data-theme="dark"] select {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--hairline);
+}
+[data-theme="dark"] .tool-button { color: var(--text); background: var(--surface-2); }
+[data-theme="dark"] .tool-button:hover { background: var(--surface-3); }
+[data-theme="dark"] .icon-button { color: var(--text); background: var(--surface-2); }
+[data-theme="dark"] .icon-button:hover { background: var(--surface-3); }
+[data-theme="dark"] .icon-button.primary { background: var(--accent); color: #fff; }
+[data-theme="dark"] .send-button { background: var(--accent); color: #fff; }
+[data-theme="dark"] .send-button:hover:not(:disabled) { background: var(--accent-strong); }
+[data-theme="dark"] .send-button:disabled { background: var(--surface-3); color: var(--muted); }
+[data-theme="dark"] .composer-menu {
+  background: var(--surface);
+  border-color: var(--hairline);
+  box-shadow: 0 16px 38px rgba(0,0,0,0.5);
+}
+[data-theme="dark"] .composer-menu button { color: var(--text); }
+[data-theme="dark"] .composer-menu button:hover,
+[data-theme="dark"] .composer-menu button[aria-selected="true"] { background: var(--surface-2); }
+[data-theme="dark"] .composer-menu-header { color: var(--muted); }
+[data-theme="dark"] .composer-menu-empty { background: var(--surface-2); border-color: var(--hairline); color: var(--muted); }
+[data-theme="dark"] .composer-command-chip .command-chip {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+[data-theme="dark"] .conversation-status { color: var(--muted); }
+[data-theme="dark"] .activity-timeline,
+[data-theme="dark"] .activity-detail { background: var(--surface); }
+[data-theme="dark"] .activity-item { color: var(--muted); border-bottom-color: var(--hairline); }
+[data-theme="dark"] .activity-item.selected { background: var(--surface-2); color: var(--text); }
+[data-theme="dark"] pre,
+[data-theme="dark"] code { color: var(--text); }
+[data-theme="dark"] .workarea-empty { color: var(--muted); }
+[data-theme="dark"] .modal-backdrop { background: rgba(0,0,0,0.6); }
+[data-theme="dark"] .session-context-menu {
+  background: var(--surface);
+  border-color: var(--hairline);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+[data-theme="dark"] .session-context-menu button { color: var(--text); }
+[data-theme="dark"] .session-context-menu button:hover { background: var(--surface-2); }
+[data-theme="dark"] .empty-state { color: var(--muted); }
+[data-theme="dark"] .attachment-thumb { border-color: var(--hairline); background: var(--surface-2); }
+[data-theme="dark"] .attachment-remove { background: rgba(0,0,0,0.7); color: #fff; }
+[data-theme="dark"] .message-attachments a { border-color: var(--hairline); }

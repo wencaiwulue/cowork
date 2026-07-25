@@ -1873,6 +1873,25 @@ export function App() {
   const [composerMenuActiveIndex, setComposerMenuActiveIndex] = useState(0)
   const [activeSlashCommand, setActiveSlashCommand] = useState<{ name: string; label: string; icon: IconName } | null>(null)
   const [activeGoal, setActiveGoal] = useState<{ id: string; text: string; createdAt: number } | null>(null)
+  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>(() => {
+    const saved = localStorage.getItem('claude-desktop-theme')
+    return (saved === 'light' || saved === 'dark' || saved === 'system') ? saved : 'system'
+  })
+
+  // Apply theme to <body>
+  useEffect(() => {
+    localStorage.setItem('claude-desktop-theme', theme)
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    function apply() {
+      const isDark = theme === 'dark' || (theme === 'system' && mq.matches)
+      document.body.setAttribute('data-theme', isDark ? 'dark' : 'light')
+    }
+    apply()
+    if (theme === 'system') {
+      mq.addEventListener('change', apply)
+      return () => mq.removeEventListener('change', apply)
+    }
+  }, [theme])
   const [sessionCreateMenu, setSessionCreateMenu] = useState<SessionCreateMenuState>()
   const [sessionCreateMenuActiveIndex, setSessionCreateMenuActiveIndex] = useState(0)
   const sessionCreateMenuItemIds = [
@@ -13057,6 +13076,23 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                     )}
 
                 <section className="settings-section" id="settings-runtime">
+                  <h3>Appearance</h3>
+                  <div className="settings-form">
+                    <div className="form-row" role="radiogroup" aria-label="Theme">
+                      <label className="toggle-row">
+                        <input type="radio" name="theme" value="system" checked={theme === 'system'} onChange={() => setTheme('system')} />
+                        System
+                      </label>
+                      <label className="toggle-row">
+                        <input type="radio" name="theme" value="light" checked={theme === 'light'} onChange={() => setTheme('light')} />
+                        Light
+                      </label>
+                      <label className="toggle-row">
+                        <input type="radio" name="theme" value="dark" checked={theme === 'dark'} onChange={() => setTheme('dark')} />
+                        Dark
+                      </label>
+                    </div>
+                  </div>
                   <h3>Runtime Settings</h3>
                   <div className="settings-grid">
                     <div>
