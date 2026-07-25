@@ -1,4 +1,5 @@
 export type ComputerUseAPI = {
+  _drainMainRunLoop(): void
   apps: {
     prepareDisplay(
       allowlistBundleIds: string[],
@@ -59,6 +60,16 @@ export type ComputerUseAPI = {
       quality: number,
       displayId?: number,
     ): Promise<{ base64: string; width: number; height: number }>
+  }
+  hotkey?: {
+    register?(...args: unknown[]): Promise<void> | void
+    unregister?(...args: unknown[]): Promise<void> | void
+    registerEscape?(...args: unknown[]): Promise<void> | void
+    notifyExpectedEscape?(...args: unknown[]): Promise<void> | void
+  }
+  tcc?: {
+    hasAccessibilityPermission?(): Promise<boolean> | boolean
+    hasScreenCapturePermission?(): Promise<boolean> | boolean
   }
   resolvePrepareCapture(
     allowedBundleIds: string[],

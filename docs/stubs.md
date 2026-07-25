@@ -70,6 +70,35 @@ that TypeScript checking is not clean because the source snapshot lacks
 generated/type-only files and does not exactly match the original dependency
 set.
 
+## 2026-07-24 Stub Completion (Swift Stub Implemented)
+
+### `@ant/computer-use-swift` — Completed
+
+Previously exported empty `{}`. Now fully implemented using native macOS commands:
+
+| Feature | Implementation |
+|---|---|
+| `display.getSize()` / `listAll()` | Parses `system_profiler SPDisplaysDataType` for Retina resolution |
+| `screenshot.captureExcluding()` | Uses `screencapture` CLI with PNG IHDR dimension parsing |
+| `screenshot.captureRegion()` | Uses `screencapture -R x,y,w,h` for region capture |
+| `apps.prepareDisplay()` | AppleScript activate for target app |
+| `apps.listRunning()` / `previewHideSet()` | AppleScript System Events process listing |
+| `apps.listInstalled()` | `mdfind` for .app bundles |
+| `apps.open()` / `unhide()` | AppleScript activate |
+| `tcc.hasAccessibilityPermission()` | Tests System Events AppleScript access |
+| `tcc.hasScreenCapturePermission()` | Tests screencapture success |
+| `hotkey.*` | No-op stubs (ESC hotkey handled by CLI layer) |
+| `resolvePrepareCapture()` | Combines display info + screenshot |
+
+### All 4 Stubs Status: ✅ Complete
+
+| Stub | Status | Implementation |
+|---|---|---|
+| `@ant/claude-for-chrome-mcp` | ✅ Complete | Playwright-backed MCP server (17 tools) |
+| `@ant/computer-use-input` | ✅ Complete | nut-tree-fork mouse/keyboard wrapper |
+| `@ant/computer-use-mcp` | ✅ Complete | MCP server with local tool execution (22 tools) |
+| `@ant/computer-use-swift` | ✅ Complete | macOS CLI/screencapture/AppleScript implementation |
+
 ## 2026-07-24 Stub Audit (Quickstarts Reference)
 
 Audited against [anthropics/claude-quickstarts](https://github.com/anthropics/claude-quickstarts):
