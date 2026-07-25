@@ -937,29 +937,6 @@ function MessageContent({
   )
 }
 
-function sessionDateGroup(ts: number): string {
-  const now = new Date()
-  const d = new Date(ts)
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const yesterday = new Date(today.getTime() - 86400000)
-  const weekAgo = new Date(today.getTime() - 7 * 86400000)
-  if (d >= today) return 'Today'
-  if (d >= yesterday) return 'Yesterday'
-  if (d >= weekAgo) return 'Previous 7 days'
-  return 'Older'
-}
-
-function groupSessionsByDate(sessions: DesktopSession[]): Array<{ label: string; sessions: DesktopSession[] }> {
-  const groups: Record<string, DesktopSession[]> = {}
-  for (const s of sessions) {
-    const label = sessionDateGroup(s.updatedAt)
-    if (!groups[label]) groups[label] = []
-    groups[label].push(s)
-  }
-  const order = ['Today', 'Yesterday', 'Previous 7 days', 'Older']
-  return order.filter(l => groups[l]?.length).map(label => ({ label, sessions: groups[label]! }))
-}
-
 function sessionActivityLabel(session?: DesktopSession): string {
   if (!session) return 'idle'
   if (session.activity === 'waiting_permission') return 'waiting for permission'
@@ -1906,24 +1883,6 @@ export function App() {
     'session-menu-item-close',
   ]
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
-  const [rightPanelOpen, setRightPanelOpen] = useState(false)
-  const [rightPanelView, setRightPanelView] = useState<'settings'|'agents'|'teams'|'tasks'|'mcp'|'skills'>('settings')
-
-  function openRightPanel(view: typeof rightPanelView): void {
-    setRightPanelView(view)
-    setRightPanelOpen(true)
-    // Map panel view to primary nav view so existing sections render
-    const navMap: Record<string, PrimaryNavView> = {
-      settings: 'settings', agents: 'agents', teams: 'teams',
-      tasks: 'tasks', mcp: 'mcp', skills: 'skills'
-    }
-    selectPrimaryNavView(navMap[view] ?? 'settings')
-  }
-
-  function closeRightPanel(): void {
-    setRightPanelOpen(false)
-    setPrimaryNavView('chat')
-  }
   const [commandPaletteQuery, setCommandPaletteQuery] = useState('')
   const [commandPaletteActiveIndex, setCommandPaletteActiveIndex] = useState(0)
   const [commandPaletteStatus, setCommandPaletteStatus] = useState<PaneStatus>()
@@ -10769,14 +10728,17 @@ export function App() {
             <h1>Desktop</h1>
           </div>
           <button
-            className="new-chat-button"
-            onClick={handleQuickSessionClick}
-            title="New chat"
-            aria-label="New chat"
+            className="icon-button primary"
+            onClick={handleSessionCreateButtonClick}
+            title="New session"
+            aria-label="New session"
+            aria-haspopup="menu"
+            aria-controls="session-create-menu"
+            aria-expanded={Boolean(sessionCreateMenu)}
+            data-tooltip="New session"
             disabled={!!loadingLabel}
           >
             <Icon name="plus" />
-            <span>New chat</span>
           </button>
         </div>
         <nav className="primary-nav" aria-label="Primary navigation">
@@ -10830,55 +10792,49 @@ export function App() {
           </button>
           {!sessionsCollapsed && (
             <div className="session-list">
-              {(() => {
-                const grouped = groupSessionsByDate(sessions)
-                return grouped.map(group => (
-                  <div key={group.label} className="session-group">
-                    <div className="session-group-label">{group.label}</div>
-                    {group.sessions.map(session => (
-                      <div
-                        key={session.id}
-                        className="session-row-shell"
-                        onContextMenu={event => openSessionMenuForRow(event, session.id)}
-                      >
-                        <button
-                          className={`session-row ${session.id === activeSessionId ? 'active' : ''}`}
-                          aria-current={session.id === activeSessionId ? 'true' : undefined}
-                          onClick={() => handleSessionRowClick(session.id)}
-                          disabled={!!loadingLabel}
-                          title={session.cwd}
-                        >
-                          <span className={`status-dot ${session.status} ${session.activity}`} />
-                          <span className="session-copy">
-                            <strong>{session.title}</strong>
-                          </span>
-                        </button>
-                        <button
-                          className="session-menu-button"
-                          type="button"
-                          title="Manage session"
-                          aria-label={`Manage ${session.title}`}
-                          aria-haspopup="menu"
-                          aria-controls={sessionMenu?.sessionId === session.id ? 'session-action-menu' : undefined}
-                          aria-expanded={sessionMenu?.sessionId === session.id}
-                          data-tooltip="Manage session"
-                          onClick={event => openSessionMenuForRow(event, session.id)}
-                          disabled={!!loadingLabel}
-                        >
-                          <Icon name="more" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ))
-              })()}
+              {sessions.map(session => (
+                <div
+                  key={session.id}
+                  className="session-row-shell"
+                  onContextMenu={event => openSessionMenuForRow(event, session.id)}
+                >
+                  <button
+                    className={`session-row ${session.id === activeSessionId ? 'active' : ''}`}
+                    aria-current={session.id === activeSessionId ? 'true' : undefined}
+                    onClick={() => handleSessionRowClick(session.id)}
+                    disabled={!!loadingLabel}
+                  >
+                    <span className={`status-dot ${session.status} ${session.activity}`} />
+                    <span className="session-copy">
+                      <strong>{session.title}</strong>
+                      <small>{sessionActivityLabel(session)} · {session.cwd}</small>
+                    </span>
+                    <span className="session-time">{formatTime(session.updatedAt)}</span>
+                  </button>
+                  <button
+                    className="session-menu-button"
+                    type="button"
+                    title="Manage session"
+                    aria-label={`Manage ${session.title}`}
+                    aria-haspopup="menu"
+                    aria-controls={sessionMenu?.sessionId === session.id ? 'session-action-menu' : undefined}
+                    aria-expanded={sessionMenu?.sessionId === session.id}
+                    data-tooltip="Manage session"
+                    onClick={event => openSessionMenuForRow(event, session.id)}
+                    disabled={!!loadingLabel}
+                  >
+                    <Icon name="more" />
+                  </button>
+                </div>
+              ))}
             </div>
           )}
         </section>
         <div className="rail-footer">
-          <button onClick={() => openRightPanel('settings')} className={rightPanelOpen && rightPanelView === 'settings' ? 'active' : ''}>
+          <button {...primaryNavState('settings')} onClick={handlePrimaryNavClick('settings')}>
             <Icon name="settings" />
             <span>Settings</span>
+            <small className="nav-shortcut">⌘7</small>
           </button>
         </div>
       </aside>
@@ -10997,12 +10953,6 @@ export function App() {
             </div>
             {activeSession && (
               <div className="header-actions">
-                <button className="icon-button" title="Agents" aria-label="Agents" data-tooltip="Agents" onClick={() => openRightPanel('agents')} disabled={!!loadingLabel}>
-                  <Icon name="bot" />
-                </button>
-                <button className="icon-button" title="Tasks" aria-label="Tasks" data-tooltip="Tasks" onClick={() => openRightPanel('tasks')} disabled={!!loadingLabel}>
-                  <Icon name="clipboard" />
-                </button>
                 <button className="icon-button" title="Refresh workspace" aria-label="Refresh workspace" data-tooltip="Refresh workspace" onClick={handleRefreshWorkspaceClick} disabled={!activeSession || !!loadingLabel}>
                   <Icon name="refresh" />
                 </button>
