@@ -8,6 +8,7 @@ export const desktopChannels = [
   'sessions:resume',
   'sessions:focus',
   'sessions:close',
+  'sessions:rename',
   'sessions:send',
   'sessions:launchAgentTask',
   'sessions:stopAgentTask',
@@ -15,6 +16,7 @@ export const desktopChannels = [
   'sessions:previewAgentTaskOutput',
   'sessions:resumeAgentTask',
   'sessions:cancel',
+  'sessions:answerQuestion',
   'sessions:updateLayout',
   'sessions:clearDesktopView',
   'permissions:respond',
@@ -126,6 +128,15 @@ export function validateIpcArgs(
         expectNonEmptyStringArg(channel, args, 1, 'text'),
         args[2] === undefined ? undefined : args[2],
       ].filter(value => value !== undefined)
+    }
+    case 'sessions:answerQuestion': {
+      expectArity(channel, args, 4)
+      return [
+        expectStringArg(channel, args, 0, 'sessionId'),
+        expectStringArg(channel, args, 1, 'toolUseId'),
+        args[2], // answers: Record<string, string>
+        args[3], // questions: Array<{question, options}>
+      ]
     }
     case 'sessions:launchAgentTask': {
       expectArity(channel, args, 2)
@@ -450,6 +461,20 @@ export type DesktopAttachment = {
   dataUrl: string
 }
 
+export type DesktopQuestionOption = {
+  label: string
+  description: string
+}
+export type DesktopQuestion = {
+  toolUseId: string
+  questions: Array<{
+    question: string
+    header: string
+    options: DesktopQuestionOption[]
+    multiSelect: boolean
+  }>
+}
+
 export type DesktopMessage = {
   id: string
   role: 'user' | 'assistant' | 'thinking' | 'system' | 'tool'
@@ -457,6 +482,7 @@ export type DesktopMessage = {
   streaming?: boolean
   raw?: unknown
   attachments?: DesktopAttachment[]
+  question?: DesktopQuestion
 }
 
 export type AgentSource =

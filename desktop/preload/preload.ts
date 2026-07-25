@@ -63,6 +63,8 @@ const api = {
       ipcRenderer.invoke('sessions:focus', sessionId) as Promise<void>,
     close: (sessionId: string) =>
       ipcRenderer.invoke('sessions:close', sessionId) as Promise<void>,
+    rename: (sessionId: string, title: string) =>
+      ipcRenderer.invoke('sessions:rename', sessionId, title) as Promise<DesktopSession>,
     send: (sessionId: string, text: string, attachments?: Array<{ id: string; mimeType: string; filename: string; dataUrl: string }>) =>
       ipcRenderer.invoke('sessions:send', sessionId, text, attachments) as Promise<void>,
     launchAgentTask: (sessionId: string, input: AgentLaunchInput) =>
@@ -100,6 +102,13 @@ const api = {
       ) as Promise<void>,
     cancel: (sessionId: string) =>
       ipcRenderer.invoke('sessions:cancel', sessionId) as Promise<void>,
+    answerQuestion: (
+      sessionId: string,
+      toolUseId: string,
+      answers: Record<string, string>,
+      questions: Array<{question: string; options: Array<{label: string; description: string}>}>,
+    ) =>
+      ipcRenderer.invoke('sessions:answerQuestion', sessionId, toolUseId, answers, questions) as Promise<void>,
     clearDesktopView: (sessionId: string) =>
       ipcRenderer.invoke('sessions:clearDesktopView', sessionId) as Promise<DesktopSession>,
     updateLayout: (sessionId: string, patch: Partial<DesktopSession['layout']>) =>

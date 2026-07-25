@@ -529,6 +529,7 @@ function registerIpc(): void {
     'sessions:resume',
     'sessions:focus',
     'sessions:close',
+    'sessions:rename',
     'sessions:send',
     'sessions:launchAgentTask',
     'sessions:stopAgentTask',
@@ -636,6 +637,9 @@ function registerIpc(): void {
   handleIpc('sessions:close', (sessionId: string) =>
     sessionManager.close(sessionId),
   )
+  handleIpc('sessions:rename', (sessionId: string, title: string) =>
+    sessionManager.renameSession(sessionId, title),
+  )
   handleIpc('sessions:send', (sessionId: string, text: string, attachments?: DesktopAttachment[]) =>
     sessionManager.send(sessionId, text, attachments),
   )
@@ -658,6 +662,9 @@ function registerIpc(): void {
   )
   handleIpc('sessions:resumeAgentTask', (sessionId: string, input: AgentTaskResumeInput) =>
     sessionManager.send(sessionId, buildAgentTaskResumePrompt(input)),
+  )
+  handleIpc('sessions:answerQuestion', (sessionId: string, toolUseId: string, answers: Record<string, string>, questions: Array<{question: string; options: Array<{label: string; description: string}>}>) =>
+    sessionManager.answerQuestion(sessionId, toolUseId, answers, questions),
   )
   handleIpc('sessions:cancel', (sessionId: string) =>
     sessionManager.cancel(sessionId),

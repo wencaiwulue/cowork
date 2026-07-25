@@ -234,6 +234,17 @@ export class DesktopSessionManager {
     }
   }
 
+  renameSession(sessionId: string, title: string): DesktopSession {
+    const session = this.sessions.get(sessionId)
+    if (!session) throw new Error(`Session ${sessionId} not found`)
+    const trimmed = title.trim()
+    if (!trimmed) throw new Error('Title must not be empty')
+    session.title = trimmed
+    session.updatedAt = Date.now()
+    this.emit({ type: 'session-updated', session })
+    return session
+  }
+
   async send(sessionId: string, text: string, attachments?: DesktopAttachment[]): Promise<void> {
     const session = this.getSession(sessionId)
     const host = this.hosts.get(sessionId) ?? this.startHost(session)
@@ -251,6 +262,18 @@ export class DesktopSessionManager {
     this.emit({ type: 'session-updated', session })
     this.emit({ type: 'runtime-message', sessionId: session.id, message: { type: 'outgoing:user-send', text, timestamp: Date.now(), attachments } })
     host.sendMessage(text, attachments)
+  }
+
+  async answerQuestion(
+    sessionId: string,
+    toolUseId: string,
+    answers: Record<string, string>,
+    questions: Array<{question: string; options: Array<{label: string; description: string}>}>,
+  ): Promise<void> {
+    const session = this.getSession(sessionId)
+    const host = this.hosts.get(sessionId) ?? this.startHost(session)
+    host.answerQuestion(toolUseId, answers, questions)
+    this.emit({ type: 'runtime-message', sessionId: session.id, message: { type: 'question:answered', toolUseId, answers, timestamp: Date.now() } })
   }
 
   async cancel(sessionId: string): Promise<void> {

@@ -33,6 +33,7 @@ export type SessionHost = EventEmitter & {
   readonly sessionId: string
   readonly cwd: string
   sendMessage(text: string, attachments?: DesktopAttachment[]): void
+  answerQuestion(toolUseId: string, answers: Record<string, string>, questions: Array<{question: string; options: Array<{label: string; description: string}>}>): void
   respondToPermission(requestId: string, response: PermissionResponse): void
   cancel(): void
   close(): void
@@ -222,8 +223,8 @@ export function createSessionHost(options: SessionHostOptions): SessionHost {
         blocks.push({ type: 'text', text })
       }
       for (const att of attachments) {
+        const b64Data = att.dataUrl.split(',')[1] ?? ''
         if (att.mimeType.startsWith('image/')) {
-          const b64Data = att.dataUrl.split(',')[1] ?? ''
           blocks.push({
             type: 'image',
             source: {
@@ -231,6 +232,21 @@ export function createSessionHost(options: SessionHostOptions): SessionHost {
               media_type: att.mimeType,
               data: b64Data,
             },
+          })
+        } else if (att.mimeType === 'application/pdf') {
+          blocks.push({
+            type: 'document',
+            source: {
+              type: 'base64',
+              media_type: 'application/pdf',
+              data: b64Data,
+            },
+          })
+        } else if (att.mimeType.startsWith('text/')) {
+          const text = Buffer.from(b64Data, 'base64').toString('utf-8')
+          blocks.push({
+            type: 'text',
+            text: `File: ${att.filename}\n\n\`\`\`\n${text}\n\`\`\``,
           })
         }
       }
@@ -258,6 +274,29 @@ export function createSessionHost(options: SessionHostOptions): SessionHost {
         request_id: requestId,
         response,
       },
+    })
+  }
+
+  host.answerQuestion = (
+    toolUseId: string,
+    answers: Record<string, string>,
+    questions: Array<{question: string; options: Array<{label: string; description: string}>}>,
+  ) => {
+    const toolResultContent = JSON.stringify({ questions, answers })
+    writeJsonLine(child, {
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: toolUseId,
+            content: toolResultContent,
+          },
+        ],
+      },
+      parent_tool_use_id: null,
+      session_id: options.sessionId,
     })
   }
 

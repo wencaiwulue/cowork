@@ -1,4 +1,4 @@
-import type { AgentTaskInfo, AgentTaskToolEvent, DesktopMessage } from './ipc'
+import type { AgentTaskInfo, AgentTaskToolEvent, DesktopMessage, DesktopQuestion } from './ipc'
 
 function extractText(value: unknown): string {
   if (typeof value === 'string') return value
@@ -41,6 +41,42 @@ function extractThinking(value: unknown): string {
   }
 
   return ''
+}
+
+function extractQuestion(value: unknown): DesktopQuestion | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const msg = value as { content?: unknown }
+  if (!Array.isArray(msg.content)) return undefined
+  for (const block of msg.content) {
+    if (!block || typeof block !== 'object') continue
+    const b = block as Record<string, unknown>
+    if (b.type !== 'tool_use' || b.name !== 'AskUserQuestion') continue
+    const toolUseId = typeof b.id === 'string' ? b.id : ''
+    const input = (typeof b.input === 'object' && b.input !== null ? b.input : {}) as Record<string, unknown>
+    const rawQuestions = Array.isArray(input.questions) ? input.questions : []
+    const questions = rawQuestions.map((q: unknown) => {
+      if (!q || typeof q !== 'object') return null
+      const qq = q as Record<string, unknown>
+      const opts = Array.isArray(qq.options) ? qq.options : []
+      return {
+        question: typeof qq.question === 'string' ? qq.question : '',
+        header: typeof qq.header === 'string' ? qq.header : '',
+        multiSelect: Boolean(qq.multiSelect),
+        options: opts.map((o: unknown) => {
+          if (!o || typeof o !== 'object') return { label: '', description: '' }
+          const oo = o as Record<string, unknown>
+          return {
+            label: typeof oo.label === 'string' ? oo.label : '',
+            description: typeof oo.description === 'string' ? oo.description : '',
+          }
+        }),
+      }
+    }).filter(Boolean) as DesktopQuestion['questions']
+    if (questions.length > 0) {
+      return { toolUseId, questions }
+    }
+  }
+  return undefined
 }
 
 function messageId(message: { type: string; uuid?: string }): string {
@@ -139,11 +175,13 @@ export function toDesktopMessages(raw: unknown): DesktopMessage[] {
         raw,
       })
     }
-    if (text) {
+    const question = extractQuestion(message.message)
+    if (text || question) {
       messages.push({
         id,
         role: 'assistant',
         text,
+        ...(question ? { question } : {}),
         raw,
       })
     }

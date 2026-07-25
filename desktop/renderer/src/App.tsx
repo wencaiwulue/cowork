@@ -26,6 +26,7 @@ import {
   Folder,
   GitCompare,
   Globe,
+  Monitor,
   MoreHorizontal,
   PanelRight,
   Pause,
@@ -61,6 +62,7 @@ import type {
   DesktopProxySettings,
   DesktopAttachment,
   DesktopMessage,
+  DesktopQuestion,
   DesktopSession,
   DesktopSessionLayoutPatch,
   InstalledSkillInfo,
@@ -264,7 +266,7 @@ type ChatTarget = {
   agentType: string
 }
 type ParsedMention = {
-  kind: 'agent' | 'team' | 'file' | 'skill' | 'mcp'
+  kind: 'agent' | 'team' | 'file' | 'skill' | 'mcp' | 'builtin'
   value: string
   label: string
   raw: string
@@ -283,6 +285,23 @@ type ComposerMenuItem = {
 }
 type ComposerMenuDivider = { divider: true; label: string }
 type ComposerMenuEntry = ComposerMenuItem | ComposerMenuDivider
+type LoadingScope =
+  | 'workspace'
+  | 'session'
+  | 'diagnostics'
+  | 'config'
+  | 'mcp'
+  | 'agents'
+  | 'preview'
+  | 'shell'
+
+type AppError = {
+  message: string
+  stack?: string
+  retryAction?: () => void
+  createdAt: number
+}
+
 type CommandPaletteItem = {
   id: string
   label: string
@@ -290,6 +309,7 @@ type CommandPaletteItem = {
   icon: IconName
   disabled?: boolean
   disabledReason?: string
+  group?: string
   run: () => void
 }
 type DesktopLifecycleAction =
@@ -440,6 +460,7 @@ type IconName =
   | 'flag'
   | 'folder'
   | 'globe'
+  | 'monitor'
   | 'more'
   | 'open'
   | 'panel'
@@ -484,6 +505,7 @@ const iconComponents: Record<IconName, LucideIcon> = {
   flag: Flag,
   folder: Folder,
   globe: Globe,
+  monitor: Monitor,
   more: MoreHorizontal,
   open: ExternalLink,
   panel: PanelRight,
@@ -879,6 +901,102 @@ function renderInlineMarkdown(text: string, onOpenExternalLink?: (url: string) =
   }
   if (cursor < text.length) nodes.push(text.slice(cursor))
   return nodes
+}
+
+function QuestionCard({ question, messageId, answered, onSubmit, onCancel }: {
+  question: DesktopQuestion
+  messageId: string
+  answered?: Record<string, string>
+  onSubmit: (answers: Record<string, string>) => void
+  onCancel: () => void
+}) {
+  const [selections, setSelections] = useState<Record<string, Set<string>>>(() => {
+    const initial: Record<string, Set<string>> = {}
+    if (answered) {
+      for (const [q, a] of Object.entries(answered)) {
+        initial[q] = new Set(a.split(', ').filter(Boolean))
+      }
+    }
+    return initial
+  })
+
+  if (answered) {
+    return (
+      <div className="question-card question-card-answered">
+        <div className="question-card-header">
+          <Icon name="check-circle" width={16} height={16} />
+          <span>Question answered</span>
+        </div>
+        {question.questions.map((q, i) => (
+          <div key={i} className="question-answered-item">
+            <strong>{q.header || 'Question'}</strong>
+            <span>{q.question}</span>
+            <small>You chose: {answered[q.question] ?? '(cancelled)'}</small>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  const allAnswered = question.questions.every(q => selections[q.question]?.size > 0)
+
+  function toggleOption(questionText: string, optionLabel: string, multiSelect: boolean): void {
+    setSelections(prev => {
+      const current = new Set(prev[questionText] ?? [])
+      if (multiSelect) {
+        if (current.has(optionLabel)) current.delete(optionLabel)
+        else current.add(optionLabel)
+      } else {
+        current.clear()
+        current.add(optionLabel)
+      }
+      return { ...prev, [questionText]: current }
+    })
+  }
+
+  function handleSubmit(): void {
+    const answers: Record<string, string> = {}
+    for (const q of question.questions) {
+      const selected = selections[q.question]
+      if (selected?.size) answers[q.question] = Array.from(selected).join(', ')
+    }
+    onSubmit(answers)
+  }
+
+  return (
+    <div className="question-card">
+      {question.questions.map((q, qi) => (
+        <div key={qi} className="question-block">
+          {q.header && <span className="question-chip">{q.header}</span>}
+          <p className="question-text">{q.question}</p>
+          <div className="question-options">
+            {q.options.map((opt, oi) => {
+              const isSelected = selections[q.question]?.has(opt.label)
+              return (
+                <button
+                  key={oi}
+                  type="button"
+                  className={`question-option${isSelected ? ' selected' : ''}`}
+                  onClick={() => toggleOption(q.question, opt.label, q.multiSelect)}
+                >
+                  <span className="question-option-label">{opt.label}</span>
+                  {opt.description && <span className="question-option-desc">{opt.description}</span>}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ))}
+      <div className="question-actions">
+        <button className="tool-button" onClick={onCancel}>
+          <Icon name="x" width={14} height={14} />Cancel
+        </button>
+        <button className="send-button" onClick={handleSubmit} disabled={!allAnswered}>
+          <Icon name="check" width={14} height={14} />Submit
+        </button>
+      </div>
+    </div>
+  )
 }
 
 function MessageContent({
@@ -1698,6 +1816,7 @@ export function App() {
   const rpcTimelineRef = useRef<HTMLDivElement>(null)
   const rpcMessageIdRef = useRef(0)
   const [planApprovalPending, setPlanApprovalPending] = useState(false)
+  const [planContent, setPlanContent] = useState<string | null>(null)
   const lastCheckedMessageIdRef = useRef<string>('')
 
   function detectPlanApprovalPrompt(messages: Array<{ id: string; role: string; text: string; streaming?: boolean }>): void {
@@ -1728,8 +1847,25 @@ export function App() {
     setPlanApprovalPending(isApprovalPrompt)
   }
 
+  async function handleAnswerQuestion(messageId: string, toolUseId: string, answers: Record<string, string>, questions: Array<{question: string; options: Array<{label: string; description: string}>}>): Promise<void> {
+    if (!activeSession) return
+    setAnsweredQuestions(prev => ({ ...prev, [messageId]: answers }))
+    try {
+      await window.claudeDesktop.sessions.answerQuestion(activeSession.id, toolUseId, answers, questions)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
   function approvePlan(): void {
     setPlanApprovalPending(false)
+    setPlanContent(null)
+    // Check if there's a pending ExitPlanMode permission to respond to
+    const exitPerm = pendingPermission?.toolName === 'ExitPlanMode' ? pendingPermission : permissionQueue.find(p => p.toolName === 'ExitPlanMode')
+    if (exitPerm) {
+      void respondToPermission('allow')
+      return
+    }
     setInput('Yes, approve this plan and proceed with implementation.')
     window.requestAnimationFrame(() => {
       composerTextareaRef.current?.focus()
@@ -1740,6 +1876,12 @@ export function App() {
 
   function rejectPlan(): void {
     setPlanApprovalPending(false)
+    setPlanContent(null)
+    const exitPerm = pendingPermission?.toolName === 'ExitPlanMode' ? pendingPermission : permissionQueue.find(p => p.toolName === 'ExitPlanMode')
+    if (exitPerm) {
+      void respondToPermission('deny')
+      return
+    }
     setInput('Please revise the plan: ')
     window.requestAnimationFrame(() => {
       composerTextareaRef.current?.focus()
@@ -1748,7 +1890,8 @@ export function App() {
 
 
   function addAttachmentFromFile(file: File): void {
-    if (!file.type.startsWith('image/')) return
+    const isSupported = file.type.startsWith('image/') || file.type === 'application/pdf' || file.type.startsWith('text/')
+    if (!isSupported) return
     const reader = new FileReader()
     reader.onload = () => {
       const result = reader.result
@@ -1773,7 +1916,7 @@ export function App() {
     if (!items) return
     for (let i = 0; i < items.length; i++) {
       const item = items[i]
-      if (item.kind === 'file' && item.type.startsWith('image/')) {
+      if (item.kind === 'file' && (item.type.startsWith('image/') || item.type === 'application/pdf' || item.type.startsWith('text/'))) {
         const file = item.getAsFile()
         if (file) addAttachmentFromFile(file)
       }
@@ -1781,13 +1924,13 @@ export function App() {
   }
 
   function handleComposerDragOver(event: ReactDragEvent<HTMLElement>): void {
-    if (Array.from(event.dataTransfer.items).some(item => item.kind === 'file' && item.type.startsWith('image/'))) {
+    if (Array.from(event.dataTransfer.items).some(item => item.kind === 'file' && (item.type.startsWith('image/') || item.type === 'application/pdf' || item.type.startsWith('text/')))) {
       event.preventDefault()
     }
   }
 
   function handleComposerDrop(event: ReactDragEvent<HTMLElement>): void {
-    const files = Array.from(event.dataTransfer.files).filter(f => f.type.startsWith('image/'))
+    const files = Array.from(event.dataTransfer.files).filter(f => f.type.startsWith('image/') || f.type === 'application/pdf' || f.type.startsWith('text/'))
     if (!files.length) return
     event.preventDefault()
     for (const file of files) addAttachmentFromFile(file)
@@ -1801,7 +1944,7 @@ export function App() {
     const files = event.target.files
     if (!files) return
     for (const file of Array.from(files)) {
-      if (file.type.startsWith('image/')) addAttachmentFromFile(file)
+      if (file.type.startsWith('image/') || file.type === 'application/pdf' || file.type.startsWith('text/')) addAttachmentFromFile(file)
     }
     event.target.value = ''
   }
@@ -1911,8 +2054,18 @@ export function App() {
   const [commandPaletteStatus, setCommandPaletteStatus] = useState<PaneStatus>()
   const [pendingDesktopNavigation, setPendingDesktopNavigation] =
     useState<DesktopNavigationEvent>()
-  const [loadingLabel, setLoadingLabel] = useState<string>()
-  const [error, setError] = useState<string>()
+  const [loading, setLoading] = useState<Partial<Record<LoadingScope, string>>>({})
+  const [error, setError] = useState<AppError>()
+  const [errorDetailsOpen, setErrorDetailsOpen] = useState(false)
+  const loadingLabel = useMemo(() => {
+    const entries = Object.entries(loading)
+    return entries.length ? entries[0][1] : undefined
+  }, [loading])
+  function isLoading(scope: LoadingScope): boolean {
+    return Boolean(loading[scope])
+  }
+  const [dismissedSessionErrors, setDismissedSessionErrors] = useState<Set<string>>(new Set())
+  const [answeredQuestions, setAnsweredQuestions] = useState<Record<string, Record<string, string>>>({})
   const [copiedTarget, setCopiedTarget] = useState<string>()
   const [permissionQueue, setPermissionQueue] = useState<
     Array<NormalizedPermissionRequest & { error?: string }>
@@ -1921,7 +2074,7 @@ export function App() {
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest>()
 
   function startNewTeamDraft(): void {
-    if (loadingLabel) return
+    if (isLoading('session')) return
     if (!activeSession) {
       setTeamsStatus({ kind: 'error', text: 'Select a session before creating teams.' })
       return
@@ -2001,6 +2154,12 @@ export function App() {
   const permissionDenyButtonRef = useRef<HTMLButtonElement>(null)
   const pendingPaneSectionRef = useRef<{ pane: PaneId; sectionId: string }>()
   const composerMenuActiveIndexRef = useRef(0)
+  const sessionMenuRef = useRef<HTMLDivElement>(null)
+  const sessionCreateMenuRef = useRef<HTMLDivElement>(null)
+  const sessionMenuReturnFocusRef = useRef<HTMLElement | null>(null)
+  const [renamingSessionId, setRenamingSessionId] = useState<string>()
+  const [renameValue, setRenameValue] = useState('')
+  const renameInputRef = useRef<HTMLInputElement>(null)
   const activeSession = sessions.find(session => session.id === activeSessionId)
   const activePane = activeSession?.layout.activePane ?? globalPane
   const liveConversationStatus = conversationStatusText(activeSession)
@@ -2110,19 +2269,30 @@ export function App() {
     }
   }
 
-  async function runAction<T>(label: string, action: () => Promise<T>): Promise<T | undefined> {
+  async function runAction<T>(scope: LoadingScope, label: string, action: () => Promise<T>): Promise<T | undefined> {
     setError(undefined)
-    setLoadingLabel(label)
+    setErrorDetailsOpen(false)
+    setLoading(prev => ({ ...prev, [scope]: label }))
     const errorTarget = activePane
     try {
       return await action()
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)
-      setError(message)
+      const stack = cause instanceof Error ? cause.stack : undefined
+      setError({
+        message,
+        stack,
+        retryAction: () => { void runAction(scope, label, action) },
+        createdAt: Date.now(),
+      })
       setActivePaneError(errorTarget, message)
       return undefined
     } finally {
-      setLoadingLabel(undefined)
+      setLoading(prev => {
+        const next = { ...prev }
+        delete next[scope]
+        return next
+      })
     }
   }
 
@@ -2138,7 +2308,7 @@ export function App() {
         setCopiedTarget(current => current === target ? undefined : current)
       }, 1600)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError({ message: cause instanceof Error ? cause.message : String(cause), createdAt: Date.now() })
     }
   }
 
@@ -2161,7 +2331,7 @@ export function App() {
       await window.claudeDesktop.app.closeWindow()
     } catch (cause) {
       allowWindowUnloadRef.current = false
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError({ message: cause instanceof Error ? cause.message : String(cause), createdAt: Date.now() })
     } finally {
       appCloseActionPendingRef.current = false
     }
@@ -2215,7 +2385,7 @@ export function App() {
   }
 
   function settleConfirmation(confirmed: boolean): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     if (!confirmResolverRef.current) return
     confirmResolverRef.current(confirmed)
     confirmResolverRef.current = undefined
@@ -2286,7 +2456,7 @@ export function App() {
       primaryNavView !== 'chat' ||
       !activeSession ||
       turnBusy ||
-      loadingLabel ||
+      isLoading('session') ||
       confirmRequest ||
       pendingPermission
     ) return
@@ -2318,6 +2488,27 @@ export function App() {
     } else if (!event.shiftKey && active === last) {
       event.preventDefault()
       first?.focus()
+    }
+  }
+
+  function trapMenuFocus(
+    event: KeyboardEvent,
+    menu: HTMLElement | null,
+    itemSelector: string,
+  ): void {
+    if (!menu) return
+    if (event.key === 'Tab') {
+      event.preventDefault()
+      const items = [...menu.querySelectorAll<HTMLElement>(itemSelector)]
+        .filter(el => el.offsetParent !== null)
+      if (!items.length) return
+      const active = document.activeElement
+      const currentIndex = items.findIndex(el => el === active)
+      const nextIndex = event.shiftKey
+        ? (currentIndex <= 0 ? items.length - 1 : currentIndex - 1)
+        : (currentIndex >= items.length - 1 ? 0 : currentIndex + 1)
+      items[nextIndex]?.focus()
+      return
     }
   }
 
@@ -2437,13 +2628,13 @@ export function App() {
       setConversationNotice({ kind: 'error', text: 'Select a session before refreshing the workspace.' })
       return
     }
-    if (loadingLabel) return
+    if (isLoading('workspace')) return
     const session = activeSession
-    await runAction('Refreshing workspace', () => refreshWorkspace(session, { showStatus: true }))
+    await runAction('workspace', 'Refreshing workspace', () => refreshWorkspace(session, { showStatus: true }))
   }
 
   function handleRefreshWorkspaceClick(): void {
-    if (loadingLabel) return
+    if (isLoading('workspace')) return
     void refreshActiveWorkspace()
   }
 
@@ -2552,12 +2743,12 @@ export function App() {
   }
 
   async function refreshSettingsConfig(): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     if (settingsRefreshActionPendingRef.current) return
     const session = activeSession
     settingsRefreshActionPendingRef.current = true
     try {
-      await runAction('Refreshing config', async () => {
+      await runAction('config', 'Refreshing config', async () => {
         await refreshDesktopConfig({ showStatus: !session })
         if (session) {
           await refreshWorkspace(session)
@@ -2571,11 +2762,11 @@ export function App() {
   }
 
   async function exportDiagnostics(): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     if (diagnosticsExportActionPendingRef.current) return
     diagnosticsExportActionPendingRef.current = true
     try {
-      await runAction('Exporting diagnostics', async () => {
+      await runAction('diagnostics', 'Exporting diagnostics', async () => {
         const result = await window.claudeDesktop.app.exportDiagnostics()
         if (!result) {
           setSettingsStatus({ kind: 'info', text: 'Diagnostic export cancelled.' })
@@ -2602,6 +2793,14 @@ export function App() {
   }, [canUseRemoteIsolation])
 
   useEffect(() => {
+    if (!error) return
+    const timer = window.setTimeout(() => {
+      setError(undefined)
+    }, 8000)
+    return () => window.clearTimeout(timer)
+  }, [error])
+
+  useEffect(() => {
     if (!confirmRequest) return
     confirmCancelButtonRef.current?.focus()
     function onKeyDown(event: KeyboardEvent): void {
@@ -2609,13 +2808,13 @@ export function App() {
       if (event.key === 'Escape') {
         event.preventDefault()
         event.stopPropagation()
-        if (loadingLabel) return
+        if (isLoading('session')) return
         settleConfirmation(false)
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [confirmRequest, loadingLabel])
+  }, [confirmRequest, loading])
 
   useEffect(() => {
     if (!pendingPermission) return
@@ -2626,19 +2825,19 @@ export function App() {
       if (event.key === 'Escape') {
         event.preventDefault()
         event.stopPropagation()
-        if (loadingLabel || permissionResponding) return
+        if (isLoading('session') || permissionResponding) return
         void respondToPermission('deny')
         return
       }
       if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
         event.preventDefault()
-        if (loadingLabel || permissionResponding) return
+        if (isLoading('session') || permissionResponding) return
         void respondToPermission('allow')
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [pendingPermission?.requestId, loadingLabel, permissionResponding])
+  }, [pendingPermission?.requestId, loading, permissionResponding])
 
   useEffect(() => {
     if (!commandPaletteOpen) {
@@ -2695,7 +2894,7 @@ export function App() {
   useEffect(() => {
     hasUnsavedChangesRef.current = hasUnsavedChanges
     void window.claudeDesktop.app.setUnsavedChanges(hasUnsavedChanges).catch(cause => {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError({ message: cause instanceof Error ? cause.message : String(cause), createdAt: Date.now() })
     })
     if ('__claudeDesktopSmokeEvents' in window) {
       window.__claudeDesktopSmokeHasUnsavedChanges = hasUnsavedChanges
@@ -2708,7 +2907,7 @@ export function App() {
     activeSession?.id,
     primaryNavView,
     turnBusy,
-    loadingLabel,
+    loading,
     confirmRequest,
     pendingPermission?.requestId,
   ])
@@ -2722,25 +2921,38 @@ export function App() {
     function onKeyDown(event: KeyboardEvent): void {
       if (event.key === 'Escape') {
         closeMenu()
+        if (canRestoreFocus(sessionMenuReturnFocusRef.current)) {
+          sessionMenuReturnFocusRef.current?.focus()
+        }
         return
       }
+      const menu = sessionCreateMenu ? sessionCreateMenuRef.current : sessionMenuRef.current
+      trapMenuFocus(event, menu, 'button[role="menuitem"]')
       const itemCount = sessionCreateMenu ? 2 : sessionMenu ? 3 : 0
       if (!itemCount) return
       if (event.key === 'ArrowDown') {
         event.preventDefault()
         if (sessionCreateMenu) {
-          setSessionCreateMenuActiveIndex(index => (index + 1) % itemCount)
+          const nextIndex = (sessionCreateMenuActiveIndex + 1) % itemCount
+          setSessionCreateMenuActiveIndex(nextIndex)
+          document.getElementById(sessionCreateMenuItemIds[nextIndex])?.focus()
         } else {
-          setSessionMenuActiveIndex(index => (index + 1) % itemCount)
+          const nextIndex = (sessionMenuActiveIndex + 1) % itemCount
+          setSessionMenuActiveIndex(nextIndex)
+          document.getElementById(sessionActionMenuItemIds[nextIndex])?.focus()
         }
         return
       }
       if (event.key === 'ArrowUp') {
         event.preventDefault()
         if (sessionCreateMenu) {
-          setSessionCreateMenuActiveIndex(index => (index - 1 + itemCount) % itemCount)
+          const nextIndex = (sessionCreateMenuActiveIndex - 1 + itemCount) % itemCount
+          setSessionCreateMenuActiveIndex(nextIndex)
+          document.getElementById(sessionCreateMenuItemIds[nextIndex])?.focus()
         } else {
-          setSessionMenuActiveIndex(index => (index - 1 + itemCount) % itemCount)
+          const nextIndex = (sessionMenuActiveIndex - 1 + itemCount) % itemCount
+          setSessionMenuActiveIndex(nextIndex)
+          document.getElementById(sessionActionMenuItemIds[nextIndex])?.focus()
         }
         return
       }
@@ -2748,8 +2960,10 @@ export function App() {
         event.preventDefault()
         if (sessionCreateMenu) {
           setSessionCreateMenuActiveIndex(0)
+          document.getElementById(sessionCreateMenuItemIds[0])?.focus()
         } else {
           setSessionMenuActiveIndex(0)
+          document.getElementById(sessionActionMenuItemIds[0])?.focus()
         }
         return
       }
@@ -2757,8 +2971,10 @@ export function App() {
         event.preventDefault()
         if (sessionCreateMenu) {
           setSessionCreateMenuActiveIndex(itemCount - 1)
+          document.getElementById(sessionCreateMenuItemIds[itemCount - 1])?.focus()
         } else {
           setSessionMenuActiveIndex(itemCount - 1)
+          document.getElementById(sessionActionMenuItemIds[itemCount - 1])?.focus()
         }
         return
       }
@@ -2778,12 +2994,28 @@ export function App() {
       window.removeEventListener('keydown', onKeyDown)
     }
   }, [
-    loadingLabel,
+    loading,
     sessionCreateMenu,
     sessionCreateMenuActiveIndex,
     sessionMenu,
     sessionMenuActiveIndex,
   ])
+
+  useEffect(() => {
+    if (!sessionMenu) return
+    const menu = sessionMenuRef.current
+    if (!menu) return
+    const firstItem = menu.querySelector<HTMLElement>('button[role="menuitem"]')
+    requestAnimationFrame(() => firstItem?.focus())
+  }, [sessionMenu])
+
+  useEffect(() => {
+    if (!sessionCreateMenu) return
+    const menu = sessionCreateMenuRef.current
+    if (!menu) return
+    const firstItem = menu.querySelector<HTMLElement>('button[role="menuitem"]')
+    requestAnimationFrame(() => firstItem?.focus())
+  }, [sessionCreateMenu])
 
   useEffect(() => {
     const list = messageListRef.current
@@ -3013,7 +3245,7 @@ export function App() {
   ])
 
   useEffect(() => {
-    void runAction('Loading sessions', async () => {
+    void runAction('diagnostics', 'Loading sessions', async () => {
       const loaded = await window.claudeDesktop.sessions.list()
       sessionsRef.current = loaded
       setSessions(loaded)
@@ -3121,16 +3353,28 @@ export function App() {
           message: event.message,
         })
         if (request) {
+          if (request.toolName === 'ExitPlanMode') {
+            setPlanApprovalPending(true)
+            const planText = typeof request.input.plan === 'string' ? request.input.plan : null
+            if (planText) setPlanContent(planText)
+          }
           setPermissionQueue(prev =>
             prev.some(item => item.requestId === request.requestId)
               ? prev
               : [...prev, request],
           )
+          if (false) {
+            setPermissionQueue(prev =>
+              prev.some(item => item.requestId === request.requestId)
+                ? prev
+                : [...prev, request],
+            )
+          }
         }
       }
       if (event.type === 'runtime-error') {
         const presentation = runtimeErrorPresentation(event.message)
-        setError(presentation.error)
+        setError({ message: presentation.error, createdAt: Date.now() })
       }
       if (event.type === 'terminal-data') {
         setTerminalOutput(prev => `${prev}${event.data}`)
@@ -3168,7 +3412,7 @@ export function App() {
         setCommittedPreviewUrl(event.url)
       }
       if (event.type === 'desktop-error') {
-        setError(event.message)
+        setError({ message: event.message, createdAt: Date.now() })
       }
     })
   }, [])
@@ -3369,7 +3613,7 @@ export function App() {
         ? { kind: 'info', text: 'Restoring shell state...' }
         : undefined,
     )
-    void runAction('Refreshing workspace', async () => {
+    void runAction('workspace', 'Refreshing workspace', async () => {
       await refreshWorkspace(activeSession)
       if (activeSessionIdRef.current !== activeSession.id) return
       if (activeSession.layout.activeFile) {
@@ -3533,6 +3777,15 @@ export function App() {
           mentions.push({ kind: 'team', value: team.name, label: team.name, raw, index: match.index })
           continue
         }
+        // Check built-in capabilities
+        if (val === 'computer-use' || val === 'browser') {
+          const builtinLabels: Record<string, string> = {
+            'computer-use': 'computer-use',
+            'browser': 'browser',
+          }
+          mentions.push({ kind: 'builtin', value: val, label: builtinLabels[val] ?? val, raw, index: match.index })
+          continue
+        }
         // Check files - match full path or suffix
         if (val.includes('/') || val.includes('.')) {
           const file = flatTree.find(e => e.type === 'file' && (e.path === val || e.path.endsWith('/' + val)))
@@ -3573,7 +3826,7 @@ export function App() {
     const loadingReason = loadingLabel
       ? `Wait for ${loadingLabel.toLowerCase()} to finish.`
       : undefined
-    const workspaceActionDisabled = !activeSession || Boolean(loadingLabel)
+    const workspaceActionDisabled = !activeSession || isLoading('workspace')
     const workspaceActionDisabledReason = !activeSession ? sessionRequiredReason : loadingReason
     function withComposerMenuAvailability(items: ComposerMenuItem[]): ComposerMenuItem[] {
       if (!loadingReason) return items
@@ -3666,8 +3919,29 @@ export function App() {
           icon: 'terminal' as IconName,
         }))
       if (mcpItems.length) items.push({ divider: true, label: 'MCP Servers' }, ...mcpItems)
-      
-      return withComposerMenuAvailability(items.slice(0, 25))
+
+      // Built-in capabilities
+      const builtinItems: ComposerMenuItem[] = [
+        {
+          id: 'builtin:computer-use',
+          label: '@computer-use',
+          detail: 'GUI automation · control apps',
+          value: '@computer-use',
+          group: 'Built-in',
+          icon: 'monitor' as IconName,
+        },
+        {
+          id: 'builtin:browser',
+          label: '@browser',
+          detail: 'Web browser · navigate & inspect pages',
+          value: '@browser',
+          group: 'Built-in',
+          icon: 'globe' as IconName,
+        },
+      ].filter(item => matches(item.label.replace('@', '')))
+      if (builtinItems.length) items.push({ divider: true, label: 'Built-in' }, ...builtinItems)
+
+      return withComposerMenuAvailability(items.slice(0, 30))
     }
     const customCommandItems: ComposerMenuItem[] = activeSession
       ? customCommands
@@ -3789,11 +4063,11 @@ export function App() {
         label: 'refresh',
         detail: 'Reload files and git diff',
         icon: 'refresh',
-        disabled: !activeSession || Boolean(loadingLabel),
+        disabled: !activeSession || isLoading('workspace'),
         disabledReason: !activeSession ? sessionRequiredReason : loadingReason,
         action: () => {
           if (activeSession) {
-            void runAction('Refreshing workspace', () =>
+            void runAction('workspace', 'Refreshing workspace', () =>
               refreshWorkspace(activeSession, { showStatus: true }),
             )
           }
@@ -3899,7 +4173,7 @@ export function App() {
     desktopConfig?.mcpServers,
     desktopConfig?.skills,
     flatTree,
-    loadingLabel,
+    loading,
     projectMcpServers,
     projectSkills,
     teams,
@@ -3951,39 +4225,49 @@ export function App() {
         run: () => stageSlashCommand(command.name),
       })),
       {
+        id: 'session:rename',
+        label: 'Rename session',
+        detail: 'Rename the current session title',
+        icon: 'edit',
+        group: 'Session',
+        disabled: !activeSession || isLoading('session'),
+        disabledReason: !activeSession ? 'Select a session first.' : undefined,
+        run: () => activeSession && startRenameSession(activeSession.id),
+      },
+      {
         id: 'primary:chat',
         label: 'Chat',
-        detail: 'Open the conversation',
+        detail: 'Open the conversation (\u23181)',
         icon: 'panel',
-        disabled: !!loadingLabel,
-        disabledReason: loadingReason,
+        group: 'Navigate',
+        disabled: false,
         run: () => selectPrimaryNavView('chat'),
       },
       {
         id: 'primary:agents',
         label: 'Agents',
-        detail: 'Manage agent catalog, launches, and running tasks',
+        detail: 'Manage agent catalog, launches, and running tasks (\u23182)',
         icon: 'bot',
-        disabled: !!loadingLabel,
-        disabledReason: loadingReason,
+        group: 'Navigate',
+        disabled: false,
         run: () => selectPrimaryNavView('agents'),
       },
       {
         id: 'primary:teams',
         label: 'Teams',
-        detail: 'Manage local teams and teammates',
+        detail: 'Manage local teams and teammates (\u23183)',
         icon: 'users',
-        disabled: !!loadingLabel,
-        disabledReason: loadingReason,
+        group: 'Navigate',
+        disabled: false,
         run: () => selectPrimaryNavView('teams'),
       },
       {
         id: 'primary:tasks',
         label: 'Tasks',
-        detail: 'Manage scheduled task lifecycles',
+        detail: 'Manage scheduled task lifecycles (\u23184)',
         icon: 'clipboard',
-        disabled: !!loadingLabel,
-        disabledReason: loadingReason,
+        group: 'Navigate',
+        disabled: false,
         run: () => selectPrimaryNavView('tasks'),
       },
       {
@@ -3991,8 +4275,8 @@ export function App() {
         label: 'MCP Servers',
         detail: 'Manage Model Context Protocol servers',
         icon: 'terminal',
-        disabled: !!loadingLabel,
-        disabledReason: loadingReason,
+        group: 'Navigate',
+        disabled: false,
         run: () => selectPrimaryNavView('mcp'),
       },
       {
@@ -4000,17 +4284,17 @@ export function App() {
         label: 'Skills',
         detail: 'Manage installed skills and create new ones',
         icon: 'bot',
-        disabled: !!loadingLabel,
-        disabledReason: loadingReason,
+        group: 'Navigate',
+        disabled: false,
         run: () => selectPrimaryNavView('skills'),
       },
       {
         id: 'primary:settings',
         label: 'Settings',
-        detail: 'Open grouped desktop settings',
+        detail: 'Open grouped desktop settings (\u23185)',
         icon: 'settings',
-        disabled: !!loadingLabel,
-        disabledReason: loadingReason,
+        group: 'Navigate',
+        disabled: false,
         run: () => selectPrimaryNavView('settings'),
       },
       {
@@ -4049,7 +4333,7 @@ export function App() {
         label: 'Check MCP health',
         detail: 'Run the selected workspace MCP health check',
         icon: 'refresh',
-        disabled: sessionRequired || !!loadingLabel,
+        disabled: sessionRequired || isLoading('mcp'),
         disabledReason: sessionRequired ? sessionRequiredReason : loadingReason,
         run: () => {
           openPaneSection('mcp', 'mcp-servers', 'mcp')
@@ -4068,7 +4352,7 @@ export function App() {
         label: 'New user skill',
         detail: 'Create or edit a user-scope SKILL.md directly',
         icon: 'plus',
-        disabled: !!loadingLabel,
+        disabled: isLoading('mcp'),
         disabledReason: loadingReason,
         run: () => {
           openPaneSection('skills', 'skills-installed', 'skills')
@@ -4080,7 +4364,7 @@ export function App() {
         label: 'New project skill',
         detail: 'Create or edit a project-scope SKILL.md directly',
         icon: 'plus',
-        disabled: sessionRequired || !!loadingLabel,
+        disabled: sessionRequired || isLoading('mcp'),
         disabledReason: sessionRequired ? sessionRequiredReason : loadingReason,
         run: () => {
           openPaneSection('skills', 'skills-installed', 'skills')
@@ -4092,7 +4376,7 @@ export function App() {
         label: 'Install user skill',
         detail: 'Choose a local skill folder for the user scope',
         icon: 'plus',
-        disabled: !!loadingLabel,
+        disabled: isLoading('mcp'),
         disabledReason: loadingReason,
         run: () => {
           openPaneSection('skills', 'skills-installed', 'skills')
@@ -4104,7 +4388,7 @@ export function App() {
         label: 'Install project skill',
         detail: 'Choose a local skill folder for the active workspace',
         icon: 'plus',
-        disabled: sessionRequired || !!loadingLabel,
+        disabled: sessionRequired || isLoading('mcp'),
         disabledReason: sessionRequired ? sessionRequiredReason : loadingReason,
         run: () => {
           openPaneSection('skills', 'skills-installed', 'skills')
@@ -4123,7 +4407,7 @@ export function App() {
         label: 'List plugins',
         detail: 'List available plugins for the selected scope',
         icon: 'refresh',
-        disabled: !!loadingLabel || !canRunPluginCommand,
+        disabled: isLoading('config') || !canRunPluginCommand,
         disabledReason: !canRunPluginCommand
           ? 'Select a session for project or local plugin scope.'
           : loadingReason,
@@ -4137,7 +4421,7 @@ export function App() {
         label: 'Install plugin',
         detail: 'Install the plugin package in the Settings form',
         icon: 'plus',
-        disabled: !!loadingLabel || !canInstallPlugin,
+        disabled: isLoading('config') || !canInstallPlugin,
         disabledReason: !canInstallPlugin
           ? pluginScopeNeedsSession
             ? 'Select a session for project or local plugin scope.'
@@ -4153,7 +4437,7 @@ export function App() {
         label: 'Export diagnostics',
         detail: 'Write a redacted local support bundle',
         icon: 'clipboard',
-        disabled: !!loadingLabel,
+        disabled: isLoading('config'),
         disabledReason: loadingReason,
         run: () => {
           openPaneSection('settings', 'settings-runtime', 'settings')
@@ -4165,7 +4449,7 @@ export function App() {
         label: 'Refresh settings',
         detail: 'Reload Claude Code configuration',
         icon: 'refresh',
-        disabled: !!loadingLabel,
+        disabled: isLoading('config'),
         disabledReason: loadingReason,
         run: () => {
           openPaneSection('settings', 'settings-runtime', 'settings')
@@ -4177,7 +4461,7 @@ export function App() {
         label: 'Available agents',
         detail: 'Browse and select configured agents',
         icon: 'bot',
-        disabled: !!loadingLabel,
+        disabled: isLoading('config'),
         disabledReason: loadingReason,
         run: () => openPaneSection('agents', 'agents-catalog', 'agents'),
       },
@@ -4186,7 +4470,7 @@ export function App() {
         label: 'Run agent',
         detail: 'Prepare and launch an agent task',
         icon: 'play',
-        disabled: sessionRequired || !!loadingLabel,
+        disabled: sessionRequired || isLoading('config'),
         disabledReason: sessionRequired ? sessionRequiredReason : loadingReason,
         run: () => openPaneSection('agents', 'agents-launch', 'agents'),
       },
@@ -4195,7 +4479,7 @@ export function App() {
         label: 'Custom agents',
         detail: 'Create or edit user and project agents',
         icon: 'settings',
-        disabled: !!loadingLabel,
+        disabled: isLoading('config'),
         disabledReason: loadingReason,
         run: () => openPaneSection('agents', 'agents-editor', 'agents'),
       },
@@ -4204,7 +4488,7 @@ export function App() {
         label: 'New custom agent',
         detail: 'Open the agent editor with a clean draft',
         icon: 'plus',
-        disabled: !!loadingLabel,
+        disabled: isLoading('config'),
         disabledReason: loadingReason,
         run: () => {
           void openPaneSection('agents', 'agents-editor', 'agents')
@@ -4216,7 +4500,7 @@ export function App() {
         label: 'Running agent tasks',
         detail: 'Inspect, resume, or stop active agent work',
         icon: 'clipboard',
-        disabled: sessionRequired || !!loadingLabel,
+        disabled: sessionRequired || isLoading('diagnostics'),
         disabledReason: sessionRequired ? sessionRequiredReason : loadingReason,
         run: () => openPaneSection('agents', 'agents-tasks', 'agents'),
       },
@@ -4284,7 +4568,7 @@ export function App() {
         label: 'Files',
         detail: 'Open workspace file tree',
         icon: 'folder',
-        disabled: sessionRequired || !!loadingLabel,
+        disabled: sessionRequired || isLoading('config'),
         disabledReason: sessionRequired ? sessionRequiredReason : loadingReason,
         run: () => selectWorkspacePane('files'),
       },
@@ -4293,7 +4577,7 @@ export function App() {
         label: 'Diff',
         detail: 'Open git status and diff',
         icon: 'diff',
-        disabled: sessionRequired || !!loadingLabel,
+        disabled: sessionRequired || isLoading('config'),
         disabledReason: sessionRequired ? sessionRequiredReason : loadingReason,
         run: () => selectWorkspacePane('diff'),
       },
@@ -4302,7 +4586,7 @@ export function App() {
         label: 'Editor',
         detail: activeFile ? `Open editor for ${activeFile}` : 'Open file editor',
         icon: 'code',
-        disabled: sessionRequired || !!loadingLabel,
+        disabled: sessionRequired || isLoading('config'),
         disabledReason: sessionRequired ? sessionRequiredReason : loadingReason,
         run: () => selectWorkspacePane('editor'),
       },
@@ -4311,7 +4595,7 @@ export function App() {
         label: 'Terminal',
         detail: 'Open project terminal',
         icon: 'terminal',
-        disabled: sessionRequired || !!loadingLabel,
+        disabled: sessionRequired || isLoading('config'),
         disabledReason: sessionRequired ? sessionRequiredReason : loadingReason,
         run: () => selectWorkspacePane('terminal'),
       },
@@ -4320,7 +4604,7 @@ export function App() {
         label: 'Preview',
         detail: 'Open embedded browser preview',
         icon: 'globe',
-        disabled: sessionRequired || !!loadingLabel,
+        disabled: sessionRequired || isLoading('config'),
         disabledReason: sessionRequired ? sessionRequiredReason : loadingReason,
         run: () => selectWorkspacePane('preview'),
       },
@@ -4329,7 +4613,7 @@ export function App() {
         label: 'Quick desktop workspace',
         detail: 'Start a local desktop workspace session',
         icon: 'plus',
-        disabled: !!loadingLabel,
+        disabled: isLoading('config'),
         disabledReason: loadingReason,
         run: () => void createDefaultSession(),
       },
@@ -4338,7 +4622,7 @@ export function App() {
         label: 'Choose project folder',
         detail: 'Start a session from a selected directory',
         icon: 'folder',
-        disabled: !!loadingLabel,
+        disabled: isLoading('config'),
         disabledReason: loadingReason,
         run: () => void createSession(),
       },
@@ -4347,7 +4631,7 @@ export function App() {
         label: 'Clear desktop transcript view',
         detail: 'Clear local desktop messages without deleting Claude transcript storage',
         icon: 'trash',
-        disabled: sessionRequired || !!loadingLabel,
+        disabled: sessionRequired || isLoading('agents'),
         disabledReason: sessionRequired ? sessionRequiredReason : loadingReason,
         run: () => void clearDesktopTranscriptView(),
       },
@@ -4356,11 +4640,11 @@ export function App() {
         label: 'Refresh workspace',
         detail: 'Reload files, git status, agents, teams, skills, and MCP',
         icon: 'refresh',
-        disabled: !activeSession || !!loadingLabel,
+        disabled: !activeSession || isLoading('agents'),
         disabledReason: !activeSession ? sessionRequiredReason : loadingReason,
         run: () => {
           if (activeSession) {
-            void runAction('Refreshing workspace', () =>
+            void runAction('workspace', 'Refreshing workspace', () =>
               refreshWorkspace(activeSession, { showStatus: true }),
             )
           }
@@ -4389,7 +4673,7 @@ export function App() {
     canInstallPlugin,
     canRunPluginCommand,
     customCommands,
-    loadingLabel,
+    loading,
     pluginScopeNeedsSession,
   ])
   const commandPaletteItemsForQuery = useMemo(() => {
@@ -4526,7 +4810,7 @@ export function App() {
         fontFamily: 'SFMono-Regular, SF Mono, Consolas, Liberation Mono, monospace',
         fontSize: 13,
         minimap: { enabled: false },
-        readOnly: !!loadingLabel,
+        readOnly: isLoading('workspace'),
         scrollBeyondLastLine: false,
         theme: 'vs',
         wordWrap: 'on',
@@ -4551,7 +4835,7 @@ export function App() {
         }
       }
     }
-    monacoEditorRef.current.updateOptions({ readOnly: !!loadingLabel })
+    monacoEditorRef.current.updateOptions({ readOnly: isLoading('workspace') })
 
     if (monacoPathRef.current !== activeFile) {
       monacoModelRef.current?.dispose()
@@ -4572,10 +4856,10 @@ export function App() {
     return () => {
       disposed = true
     }
-  }, [activePane, activeFile, fileContents, workspaceRatio, loadingLabel])
+  }, [activePane, activeFile, fileContents, workspaceRatio, loading])
 
   function highlightSessionCreateMenuItem(index: number): void {
-    if (loadingLabel) return
+    if (isLoading('workspace')) return
     setSessionCreateMenuActiveIndex(index)
   }
 
@@ -4584,7 +4868,7 @@ export function App() {
   }
 
   function highlightSessionMenuItem(index: number): void {
-    if (loadingLabel) return
+    if (isLoading('workspace')) return
     setSessionMenuActiveIndex(index)
   }
 
@@ -4593,7 +4877,7 @@ export function App() {
   }
 
   function toggleSessionsCollapsed(): void {
-    if (loadingLabel) return
+    if (isLoading('workspace')) return
     setSessionsCollapsed(value => !value)
   }
 
@@ -4602,11 +4886,11 @@ export function App() {
   }
 
   async function createSession(): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('workspace')) return
     if (sessionCreateActionPendingRef.current) return
     sessionCreateActionPendingRef.current = true
     try {
-      await runAction('Creating session', async () => {
+      await runAction('session', 'Creating session', async () => {
         setSessionStatus({ kind: 'info', text: 'Choose a project folder to start a session.' })
         const session = await window.claudeDesktop.sessions.create()
         if (session) {
@@ -4628,11 +4912,11 @@ export function App() {
   }
 
   async function createDefaultSession(): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('workspace')) return
     if (sessionCreateActionPendingRef.current) return
     sessionCreateActionPendingRef.current = true
     try {
-      await runAction('Creating session', async () => {
+      await runAction('session', 'Creating session', async () => {
         setSessionStatus({ kind: 'info', text: 'Starting a session in the Claude desktop workspace.' })
         const session = await window.claudeDesktop.sessions.create({ defaultCwd: true })
         if (session) {
@@ -4647,19 +4931,20 @@ export function App() {
   }
 
   function handleQuickSessionClick(): void {
-    if (loadingLabel) return
+    if (isLoading('workspace')) return
     void createDefaultSession()
   }
 
   function handleChooseFolderSessionClick(): void {
-    if (loadingLabel) return
+    if (isLoading('workspace')) return
     void createSession()
   }
 
   function openSessionCreateMenu(event: ReactMouseEvent<HTMLElement>): void {
     event.preventDefault()
     event.stopPropagation()
-    if (loadingLabel) return
+    if (isLoading('workspace')) return
+    captureReturnFocus(sessionMenuReturnFocusRef)
     const rect = event.currentTarget.getBoundingClientRect()
     setSessionCreateMenuActiveIndex(0)
     setSessionCreateMenu({
@@ -4674,7 +4959,7 @@ export function App() {
   }
 
   function runSessionCreateMenuAction(index: number): void {
-    if (loadingLabel) return
+    if (isLoading('workspace')) return
     setSessionCreateMenu(undefined)
     if (index === 0) {
       void createDefaultSession()
@@ -4773,7 +5058,7 @@ export function App() {
   function chooseComposerMenuItem(item: ComposerMenuItem): void {
     const trigger = currentComposerTrigger
     if (!trigger) return
-    if (item.disabled || loadingLabel) return
+    if (item.disabled || isLoading('session')) return
     
     // Action items: execute directly without inserting text
     if (item.action) {
@@ -4833,10 +5118,20 @@ export function App() {
     chooseComposerMenuItem(item)
   }
 
+  function autoResizeComposer(): void {
+    const textarea = composerTextareaRef.current
+    if (!textarea) return
+    textarea.style.height = 'auto'
+    const maxHeight = 200
+    textarea.style.height = Math.min(textarea.scrollHeight, maxHeight) + 'px'
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden'
+  }
+
   function handleComposerInputChange(event: ReactChangeEvent<HTMLTextAreaElement>): void {
-    if (loadingLabel) return
+    if (isLoading('session')) return
     setInput(event.target.value)
     updateComposerSelection(event.target)
+    autoResizeComposer()
   }
 
   function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>): void {
@@ -4942,7 +5237,7 @@ export function App() {
     }
     hasUnsavedChangesRef.current = false
     void window.claudeDesktop.app.setUnsavedChanges(false).catch(cause => {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError({ message: cause instanceof Error ? cause.message : String(cause), createdAt: Date.now() })
     })
     if ('__claudeDesktopSmokeEvents' in window) {
       window.__claudeDesktopSmokeHasUnsavedChanges = false
@@ -4950,7 +5245,7 @@ export function App() {
   }
 
   async function focusSession(sessionId: string): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('session')) return
     if (sessionId === activeSessionIdRef.current && !sessionFocusInFlightRef.current) return
     desiredActiveSessionIdRef.current = sessionId
     if (sessionFocusInFlightRef.current) {
@@ -4981,7 +5276,7 @@ export function App() {
           await window.claudeDesktop.sessions.focus(targetSessionId)
         } catch (cause) {
           const message = cause instanceof Error ? cause.message : String(cause)
-          setError(message)
+          setError({ message, createdAt: Date.now() })
           const loaded = await window.claudeDesktop.sessions.list()
           sessionsRef.current = loaded
           setSessions(loaded)
@@ -5005,7 +5300,7 @@ export function App() {
   }
 
   function handleSessionRowClick(sessionId: string): void {
-    if (loadingLabel) return
+    if (isLoading('session')) return
     void focusSession(sessionId)
   }
 
@@ -5021,12 +5316,12 @@ export function App() {
   })
 
   function handleComposerSendClick(): void {
-    if (loadingLabel) return
+    if (isLoading('session')) return
     void sendMessage()
   }
 
   function handleComposerTargetTypeChange(event: ReactChangeEvent<HTMLSelectElement>): void {
-    if (loadingLabel) return
+    if (isLoading('session')) return
     setChatTarget(prev => ({
       ...prev,
       type: event.target.value === 'team'
@@ -5038,7 +5333,7 @@ export function App() {
   }
 
   function handleComposerTargetTeamChange(event: ReactChangeEvent<HTMLSelectElement>): void {
-    if (loadingLabel) return
+    if (isLoading('session')) return
     setChatTarget(prev => ({
       ...prev,
       teamName: event.target.value,
@@ -5046,7 +5341,7 @@ export function App() {
   }
 
   function handleComposerTargetAgentChange(event: ReactChangeEvent<HTMLSelectElement>): void {
-    if (loadingLabel) return
+    if (isLoading('session')) return
     setChatTarget(prev => ({
       ...prev,
       agentType: event.target.value,
@@ -5058,7 +5353,7 @@ export function App() {
       setPreviewStatus({ kind: 'error', text: 'Select a session before editing the preview URL.' })
       return
     }
-    if (loadingLabel) return
+    if (isLoading('session')) return
     const nextUrl = event.target.value
     setPreviewUrl(nextUrl)
     setPreviewStatus(
@@ -5109,6 +5404,10 @@ export function App() {
           cleanText = cleanText.replace(pattern, '').replace(/\s+/g, ' ').trim()
           break
         case 'mcp':
+          contextMentions.push(mention)
+          cleanText = cleanText.replace(pattern, '').replace(/\s+/g, ' ').trim()
+          break
+        case 'builtin':
           contextMentions.push(mention)
           cleanText = cleanText.replace(pattern, '').replace(/\s+/g, ' ').trim()
           break
@@ -5190,6 +5489,12 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
           contextParts.push(`[Using skill: ${cm.value}]`)
         } else if (cm.kind === 'mcp') {
           contextParts.push(`[Using MCP server: ${cm.value}]`)
+        } else if (cm.kind === 'builtin') {
+          if (cm.value === 'computer-use') {
+            contextParts.push(`[Using computer-use: You have access to GUI automation tools (mcp__computer-use__*) for controlling local applications, taking screenshots, and simulating keyboard/mouse input.]`)
+          } else if (cm.value === 'browser') {
+            contextParts.push(`[Using browser: You have access to the WebBrowser tool for opening, navigating, and inspecting web pages.]`)
+          }
         }
       }
       if (contextParts.length > 0) {
@@ -5197,6 +5502,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
       }
     }
     setInput('')
+    window.requestAnimationFrame(() => { const ta = composerTextareaRef.current; if (ta) { ta.style.height = "auto"; ta.style.overflowY = "hidden"; } })
     setComposerCursor(0)
     setActiveSlashCommand(null)
     setConversationNotice(undefined)
@@ -5213,7 +5519,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
       return
     }
     try {
-      await runAction('Sending message', async () => {
+      await runAction('session', 'Sending message', async () => {
         if (resolvedTarget.type === 'team') {
           recordOutgoingRpcMessage(session.id, 'team:send', { teamName: resolvedTarget.teamName, message: text })
           await window.claudeDesktop.teams.send(session.id, {
@@ -5275,7 +5581,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     cancelActionPendingRef.current = true
     const sessionId = session.id
     try {
-      await runAction('Cancelling turn', async () => {
+      await runAction('session', 'Cancelling turn', async () => {
         await window.claudeDesktop.sessions.cancel(sessionId)
         if (activeSessionIdRef.current !== session.id) return
         setPermissionQueue(prev =>
@@ -5290,7 +5596,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleCancelTurnClick(): void {
-    if (loadingLabel) return
+    if (isLoading('session')) return
     void cancelSession()
   }
 
@@ -5299,7 +5605,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
       setConversationNotice({ kind: 'error', text: 'Select a session before clearing the desktop transcript view.' })
       return
     }
-    if (loadingLabel) return
+    if (isLoading('session')) return
     const session = activeSession
     if (!(await requestConfirmation({
       title: 'Clear desktop transcript view?',
@@ -5308,7 +5614,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
       cancelLabel: 'Cancel',
       tone: 'danger',
     }))) return
-    await runAction('Clearing desktop transcript view', async () => {
+    await runAction('session', 'Clearing desktop transcript view', async () => {
       const cleared = await window.claudeDesktop.sessions.clearDesktopView(session.id)
       if (activeSessionIdRef.current !== session.id) return
       mergeSession(cleared)
@@ -5320,7 +5626,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleClearDesktopTranscriptViewClick(): void {
-    if (loadingLabel) return
+    if (isLoading('session')) return
     void clearDesktopTranscriptView()
   }
 
@@ -5333,8 +5639,37 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleCloseSessionClick(): void {
-    if (loadingLabel) return
+    if (isLoading('session')) return
     void closeSession()
+  }
+
+  function startRenameSession(sessionId: string): void {
+    if (isLoading('session')) return
+    const session = sessions.find(s => s.id === sessionId)
+    if (!session) return
+    setRenamingSessionId(sessionId)
+    setRenameValue(session.title)
+    requestAnimationFrame(() => renameInputRef.current?.select())
+  }
+
+  function commitRenameSession(): void {
+    const id = renamingSessionId
+    if (!id) return
+    const title = renameValue.trim()
+    setRenamingSessionId(undefined)
+    setRenameValue('')
+    if (!title) return
+    const current = sessionsRef.current.find(s => s.id === id)
+    if (current && current.title === title) return
+    void runAction('session', 'Renaming session', async () => {
+      const updated = await window.claudeDesktop.sessions.rename(id, title)
+      mergeSession(updated)
+    })
+  }
+
+  function cancelRenameSession(): void {
+    setRenamingSessionId(undefined)
+    setRenameValue('')
   }
 
   async function closeSessionById(sessionId: string): Promise<void> {
@@ -5350,7 +5685,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
         cancelLabel: 'Cancel',
         tone: 'danger',
       }))) return
-      await runAction('Closing session', () =>
+      await runAction('session', 'Closing session', () =>
         window.claudeDesktop.sessions.close(sessionId),
       )
     } finally {
@@ -5364,7 +5699,8 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   ): void {
     event.preventDefault()
     event.stopPropagation()
-    if (loadingLabel) return
+    if (isLoading('session')) return
+    captureReturnFocus(sessionMenuReturnFocusRef)
     setSessionMenuActiveIndex(0)
     setSessionMenu({
       sessionId,
@@ -5379,7 +5715,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
 
   function runSessionMenuAction(index: number): void {
     if (!sessionMenu) return
-    if (loadingLabel) return
+    if (isLoading('session')) return
     const sessionId = sessionMenu.sessionId
     if (index === 0) {
       setSessionMenu(undefined)
@@ -5409,7 +5745,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     sessionOpenFolderActionPendingRef.current.add(sessionId)
     setSessionMenu(undefined)
     try {
-      await runAction('Opening session folder', () =>
+      await runAction('session', 'Opening session folder', () =>
         window.claudeDesktop.workspace.openFolder(session.cwd),
       )
     } finally {
@@ -5422,10 +5758,10 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
       setEditorStatus({ kind: 'error', text: 'Select a session before opening files.' })
       return
     }
-    if (loadingLabel) return
+    if (isLoading('session')) return
     const session = activeSession
     if (path !== activeFile && !(await confirmDiscardUnsavedChanges())) return
-    await runAction('Opening file', async () => {
+    await runAction('workspace', 'Opening file', async () => {
       setEditorStatus({ kind: 'info', text: `Opening ${path}...` })
       let contents: string
       try {
@@ -5476,7 +5812,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     })
     fileSaveActionPendingRef.current = true
     try {
-      await runAction('Saving file', async () => {
+      await runAction('workspace', 'Saving file', async () => {
         setEditorStatus({ kind: 'info', text: `Saving ${filePath}...` })
         try {
           await window.claudeDesktop.workspace.saveFile(
@@ -5504,7 +5840,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
         setSavedFileContents(contents)
         hasUnsavedChangesRef.current = false
         void window.claudeDesktop.app.setUnsavedChanges(false).catch(cause => {
-          setError(cause instanceof Error ? cause.message : String(cause))
+          setError({ message: cause instanceof Error ? cause.message : String(cause), createdAt: Date.now() })
         })
         if ('__claudeDesktopSmokeEvents' in window) {
           window.__claudeDesktopSmokeHasUnsavedChanges = false
@@ -5525,7 +5861,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
         setSavedFileContents(contents)
         hasUnsavedChangesRef.current = false
         void window.claudeDesktop.app.setUnsavedChanges(false).catch(cause => {
-          setError(cause instanceof Error ? cause.message : String(cause))
+          setError({ message: cause instanceof Error ? cause.message : String(cause), createdAt: Date.now() })
         })
         if ('__claudeDesktopSmokeEvents' in window) {
           window.__claudeDesktopSmokeHasUnsavedChanges = false
@@ -5537,7 +5873,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleSaveFileClick(): void {
-    if (loadingLabel) return
+    if (isLoading('shell')) return
     void saveFile()
   }
 
@@ -5550,7 +5886,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     const session = activeSession
     terminalActionPendingRef.current = true
     try {
-      await runAction('Starting shell', async () => {
+      await runAction('shell', 'Starting shell', async () => {
         setTerminalStatus({ kind: 'info', text: 'Starting shell...' })
         let info: TerminalSessionInfo
         try {
@@ -5587,7 +5923,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleStartTerminalClick(): void {
-    if (loadingLabel) return
+    if (isLoading('shell')) return
     void startTerminal()
   }
 
@@ -5601,7 +5937,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     if (!currentTerminalId || terminalActionPendingRef.current) return
     terminalActionPendingRef.current = true
     try {
-      await runAction('Stopping shell', async () => {
+      await runAction('shell', 'Stopping shell', async () => {
         await window.claudeDesktop.terminal.kill(currentTerminalId)
         if (activeSessionIdRef.current !== session.id) return
         setTerminalId(undefined)
@@ -5616,7 +5952,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleStopTerminalClick(): void {
-    if (loadingLabel) return
+    if (isLoading('workspace')) return
     void stopTerminal()
   }
 
@@ -5625,7 +5961,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     primaryView: PrimaryNavView = primaryViewForPane(pane),
     options: { settingsActiveSection?: string; tasksActiveSection?: string; agentsActiveSection?: string; teamsActiveSection?: string } = {},
   ): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('workspace')) return
     const session = activeSession
     if (pane !== activePane && activePane === 'editor') {
       if (!(await confirmDiscardUnsavedChanges())) return
@@ -5651,7 +5987,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function selectWorkspacePane(pane: PaneId): void {
-    if (loadingLabel) return
+    if (isLoading('workspace')) return
     void setPane(pane)
   }
 
@@ -5665,7 +6001,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
       return
     }
     if (workspaceRefreshActionPendingRef.current.has(activeSession.id)) return
-    await runAction('Refreshing files', async () => {
+    await runAction('workspace', 'Refreshing files', async () => {
       setFilesStatus({ kind: 'info', text: 'Refreshing files...' })
       const fileCount = await refreshWorkspace(activeSession)
       const nextFileCount = fileCount ?? countWorkspaceFiles(tree)
@@ -5677,12 +6013,12 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleRefreshFilesClick(): void {
-    if (loadingLabel) return
+    if (isLoading('workspace')) return
     void refreshFiles()
   }
 
   function handleDiffFileClick(path: string): void {
-    if (loadingLabel) return
+    if (isLoading('workspace')) return
     selectDiffFile(path)
   }
 
@@ -5691,7 +6027,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
       setDiffStatus({ kind: 'error', text: 'Select a session before selecting diff files.' })
       return
     }
-    if (loadingLabel) return
+    if (isLoading('workspace')) return
     setSelectedDiffPath(path)
   }
 
@@ -5701,11 +6037,11 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
       return
     }
     if (workspaceRefreshActionPendingRef.current.has(activeSession.id)) return
-    await runAction('Refreshing diff', () => refreshWorkspace(activeSession))
+    await runAction('workspace', 'Refreshing diff', () => refreshWorkspace(activeSession))
   }
 
   function handleRefreshDiffClick(): void {
-    if (loadingLabel) return
+    if (isLoading('workspace')) return
     void refreshDiff()
   }
 
@@ -5754,7 +6090,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     primaryView: PrimaryNavView = primaryViewForPane(pane),
     options: { showStatus?: boolean } = {},
   ): void {
-    if (loadingLabel) return
+    if (isLoading('session')) return
     const showStatus = options.showStatus !== false
     pendingPaneSectionRef.current = { pane, sectionId }
     if (pane === 'settings') {
@@ -6032,7 +6368,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function openSettingsSection(sectionId: string): void {
-    if (loadingLabel) return
+    if (isLoading('session')) return
     const session = activeSession
     setSettingsActiveSection(sectionId)
     if (session) void updateSessionLayout(session.id, { settingsActiveSection: sectionId })
@@ -6048,7 +6384,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function openProjectTasksSection(): void {
-    if (loadingLabel) return
+    if (isLoading('session')) return
     if (!activeSession) {
       setSettingsStatus({ kind: 'error', text: 'Select a project session before opening project scheduled tasks.' })
       return
@@ -6057,27 +6393,27 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleProjectTasksSectionClick(): void {
-    if (loadingLabel) return
+    if (isLoading('session')) return
     openTasksSection('tasks-project-tasks')
   }
 
   function handleGlobalTasksSectionClick(): void {
-    if (loadingLabel) return
+    if (isLoading('session')) return
     openTasksSection('tasks-global-tasks')
   }
 
   function handleSettingsProjectTasksClick(): void {
-    if (loadingLabel) return
+    if (isLoading('session')) return
     openProjectTasksSection()
   }
 
   function handleSettingsGlobalTasksClick(): void {
-    if (loadingLabel) return
+    if (isLoading('session')) return
     openTasksSection('tasks-global-tasks')
   }
 
   function openPrimaryView(view: PrimaryNavView): void {
-    if (loadingLabel) return
+    if (isLoading('session')) return
     setPrimaryNavView(view)
     if (view === 'chat') {
       void setPane(
@@ -6121,7 +6457,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function selectPrimaryNavView(view: PrimaryNavView): void {
-    if (loadingLabel) return
+    if (isLoading('session')) return
     openPrimaryView(view)
   }
 
@@ -6144,6 +6480,22 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   useEffect(() => {
     detectPlanApprovalPrompt(activeSession?.messages ?? [])
   }, [activeSession?.messages])
+
+  // Plan approval keyboard shortcuts: Enter=approve, Escape=reject
+  useEffect(() => {
+    if (!planApprovalPending) return
+    function handleKey(event: KeyboardEvent): void {
+      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+        event.preventDefault()
+        approvePlan()
+      } else if (event.key === 'Escape') {
+        event.preventDefault()
+        rejectPlan()
+      }
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [planApprovalPending])
 
   // Clear plan approval when user manually modifies the composer
   useEffect(() => {
@@ -6185,6 +6537,14 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
+      if (event.key === 'F2' && !event.altKey && !event.repeat) {
+        if (confirmRequest || pendingPermission || commandPaletteOpen || sessionMenu || sessionCreateMenu || currentComposerTrigger || renamingSessionId) return
+        if (activeSessionId) {
+          event.preventDefault()
+          startRenameSession(activeSessionId)
+        }
+        return
+      }
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.repeat) return
       if (
         confirmRequest ||
@@ -6203,38 +6563,38 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
         const pane = WORKSPACE_PANE_SHORTCUTS[event.key]
         if (!pane) return
         event.preventDefault()
-        if (loadingLabel) return
+        if (isLoading('session')) return
         selectWorkspacePane(pane)
         return
       }
       if (event.key === ',') {
         event.preventDefault()
-        if (loadingLabel) return
+        if (isLoading('session')) return
         selectPrimaryNavView('settings')
         return
       }
       if (event.key.toLowerCase() === 'n' && !event.shiftKey) {
         event.preventDefault()
-        if (loadingLabel) return
+        if (isLoading('session')) return
         void handleQuickSessionClick()
         return
       }
       if (event.key.toLowerCase() === 'n' && event.shiftKey) {
         event.preventDefault()
-        if (loadingLabel) return
+        if (isLoading('session')) return
         void handleChooseFolderSessionClick()
         return
       }
       if (event.key.toLowerCase() === 'w') {
         event.preventDefault()
-        if (loadingLabel) return
+        if (isLoading('session')) return
         void closeSession()
         return
       }
       const view = PRIMARY_NAV_SHORTCUTS[event.key]
       if (!view) return
       event.preventDefault()
-      if (loadingLabel) return
+      if (isLoading('session')) return
       selectPrimaryNavView(view)
     }
     window.addEventListener('keydown', onKeyDown)
@@ -6242,11 +6602,13 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }, [
     activePane,
     activeSession,
+    activeSessionId,
     commandPaletteOpen,
     confirmRequest,
     currentComposerTrigger,
-    loadingLabel,
+    loading,
     pendingPermission,
+    renamingSessionId,
     sessionCreateMenu,
     sessionMenu,
   ])
@@ -6259,15 +6621,15 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
       const target = event.target as HTMLElement | null
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return
       event.preventDefault()
-      if (loadingLabel) return
+      if (isLoading('session')) return
       openPrimaryView('chat')
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [primaryNavView, confirmRequest, pendingPermission, commandPaletteOpen, sessionMenu, sessionCreateMenu, currentComposerTrigger, loadingLabel])
+  }, [primaryNavView, confirmRequest, pendingPermission, commandPaletteOpen, sessionMenu, sessionCreateMenu, currentComposerTrigger, loading])
 
   function handleCommandPaletteQueryChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     setCommandPaletteQuery(event.target.value)
     setCommandPaletteStatus(undefined)
   }
@@ -6294,7 +6656,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
 
   function runCommandPaletteItem(item: CommandPaletteItem | undefined): void {
     if (!item) return
-    if (loadingLabel) return
+    if (isLoading('config')) return
     if (item.disabled) {
       setCommandPaletteStatus({
         kind: 'info',
@@ -6361,8 +6723,8 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
       className: active ? 'active' : '',
       'aria-current': active ? 'page' : undefined,
       'aria-pressed': active,
-      'aria-disabled': !!loadingLabel,
-      tabIndex: loadingLabel ? -1 : 0,
+      'aria-disabled': isLoading('workspace'),
+      tabIndex: isLoading('workspace') ? -1 : 0,
     }
   }
 
@@ -6397,8 +6759,8 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     return {
       className: active ? 'active' : '',
       'aria-current': active ? 'page' : undefined,
-      'aria-disabled': !!loadingLabel,
-      tabIndex: loadingLabel ? -1 : 0,
+      'aria-disabled': isLoading('workspace'),
+      tabIndex: isLoading('workspace') ? -1 : 0,
     }
   }
 
@@ -6425,8 +6787,8 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
       className: active ? 'active' : '',
       'aria-current': active ? 'page' : undefined,
       'aria-pressed': active,
-      'aria-disabled': !!loadingLabel,
-      tabIndex: loadingLabel ? -1 : 0,
+      'aria-disabled': isLoading('workspace'),
+      tabIndex: isLoading('workspace') ? -1 : 0,
     }
   }
 
@@ -6449,8 +6811,8 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     return {
       className: activePane === pane ? 'active' : '',
       'aria-pressed': activePane === pane,
-      'aria-disabled': !!loadingLabel,
-      tabIndex: loadingLabel ? -1 : 0,
+      'aria-disabled': isLoading('workspace'),
+      tabIndex: isLoading('workspace') ? -1 : 0,
     }
   }
 
@@ -6477,37 +6839,37 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   const activeAgentCatalogItem = visibleAgents.find(agent => isAgentCatalogItemActive(agent))
 
   function handleAgentCatalogRowClick(agent: AgentInfo): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     void selectAgent(agent)
   }
 
   function handleAgentCatalogRowKeyDown(event: ReactKeyboardEvent<HTMLElement>, agent: AgentInfo): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     handleOptionSelectKeyDown(event, () => void selectAgent(agent))
   }
 
   function handleAgentCatalogSelectClick(agent: AgentInfo): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     void selectAgent(agent)
   }
 
   function handleAgentCatalogDiagnoseClick(agent: AgentInfo): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     void selectAgent(agent).then(() => diagnoseAgentByType(agent.agentType))
   }
 
   function handleAgentCatalogQueryChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     setAgentCatalogQuery(event.target.value)
   }
 
   function handleAgentCatalogSourceChange(event: ReactChangeEvent<HTMLSelectElement>): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     setAgentCatalogSource(event.target.value as AgentCatalogSourceFilter)
   }
 
   function handleAgentCatalogKeyDown(event: ReactKeyboardEvent<HTMLInputElement>): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     if (event.key === 'Escape' && agentCatalogQuery) {
       event.preventDefault()
       setAgentCatalogQuery('')
@@ -6563,7 +6925,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleTeamRowKeyDown(event: ReactKeyboardEvent<HTMLElement>, team: TeamInfo): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     handleOptionSelectKeyDown(event, () => selectTeam(team))
   }
 
@@ -6604,7 +6966,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleProjectScheduledTaskRowKeyDown(event: ReactKeyboardEvent<HTMLElement>, task: ProjectScheduledTaskInfo): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     handleOptionSelectKeyDown(event, () => editProjectScheduledTask(task))
   }
 
@@ -6623,7 +6985,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleScheduledTaskRowKeyDown(event: ReactKeyboardEvent<HTMLElement>, task: ScheduledTaskInfo): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     handleOptionSelectKeyDown(event, () => editScheduledTask(task))
   }
 
@@ -6666,7 +7028,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleMcpServerRowKeyDown(event: ReactKeyboardEvent<HTMLElement>, server: McpServerInfo, scope: 'user' | 'project'): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     handleOptionSelectKeyDown(event, () => editMcpServer(server, scope))
   }
 
@@ -6689,7 +7051,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleSkillRowKeyDown(event: ReactKeyboardEvent<HTMLElement>, skill: InstalledSkillInfo, scope: 'user' | 'project'): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     handleOptionSelectKeyDown(event, () => {
       if (scope === 'project') {
         void inspectProjectSkill(skill)
@@ -6742,7 +7104,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function canSelectPlugin(plugin: NonNullable<ClaudeDesktopConfig['plugins']>[number]): boolean {
-    if (loadingLabel) return false
+    if (isLoading('config')) return false
     return plugin.scope !== 'project' && plugin.scope !== 'local' || Boolean(activeSession)
   }
 
@@ -6757,17 +7119,17 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handlePluginListClick(): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     void listAvailablePlugins()
   }
 
   function handlePluginInstallClick(): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     void installPlugin()
   }
 
   function handlePluginDraftPackageChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (pluginDraftSessionBlocked || loadingLabel) return
+    if (pluginDraftSessionBlocked || isLoading('config')) return
     const session = activeSession
     setSelectedPluginIdentity(undefined)
     if (session) void updateSessionLayout(session.id, { selectedPluginIdentity: undefined })
@@ -6778,7 +7140,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handlePluginDraftScopeChange(event: ReactChangeEvent<HTMLSelectElement>): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     const session = activeSession
     setSelectedPluginIdentity(undefined)
     if (session) void updateSessionLayout(session.id, { selectedPluginIdentity: undefined })
@@ -6797,7 +7159,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     plugin: NonNullable<ClaudeDesktopConfig['plugins']>[number],
   ): void {
     event.stopPropagation()
-    if (loadingLabel) return
+    if (isLoading('config')) return
     void updatePlugin(plugin)
   }
 
@@ -6807,7 +7169,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     enabled: boolean,
   ): void {
     event.stopPropagation()
-    if (loadingLabel) return
+    if (isLoading('config')) return
     void setPluginEnabled(plugin, enabled)
   }
 
@@ -6816,7 +7178,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     plugin: NonNullable<ClaudeDesktopConfig['plugins']>[number],
   ): void {
     event.stopPropagation()
-    if (loadingLabel) return
+    if (isLoading('config')) return
     void uninstallPlugin(plugin)
   }
 
@@ -6873,17 +7235,17 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleSettingsBackClick(): void {
-    if (loadingLabel) return
+    if (isLoading('preview')) return
     openPrimaryView('chat')
   }
 
   function handleSettingsNavItemClick(item: SettingsNavItem): void {
-    if (loadingLabel) return
+    if (isLoading('preview')) return
     openSettingsNavItem(item)
   }
 
   function handleSettingsSearchChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (loadingLabel) return
+    if (isLoading('preview')) return
     const value = event.target.value
     setSettingsSearch(value)
   }
@@ -6898,7 +7260,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }, [settingsSearch, visibleSettingsNavItems])
 
   function handleSettingsSearchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>): void {
-    if (loadingLabel) return
+    if (isLoading('preview')) return
     if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && visibleSettingsNavItems.length) {
       event.preventDefault()
       const currentIndex = visibleSettingsNavItems.findIndex(item => isSettingsNavItemActive(item))
@@ -6933,7 +7295,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
       setFilesStatus({ kind: 'error', text: 'Select a session before expanding folders.' })
       return
     }
-    if (loadingLabel) return
+    if (isLoading('preview')) return
     const session = activeSession
     const next = new Set<string>(expandedPaths)
     if (next.has(path)) next.delete(path)
@@ -6942,7 +7304,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleFileTreeEntryClick(entry: WorkspaceEntry): void {
-    if (loadingLabel) return
+    if (isLoading('preview')) return
     if (entry.type === 'directory') {
       void toggleDirectory(entry.path)
       return
@@ -6955,18 +7317,18 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     const session = activeSession
     const url = previewUrl
     if (!session) {
-      setError('Start or select a session before opening a preview.')
+      setError({ message: 'Start or select a session before opening a preview.', createdAt: Date.now() })
       setPreviewStatus({ kind: 'error', text: 'Start or select a session before opening a preview.' })
       return
     }
     if (!isHttpUrl(url)) {
-      setError('Preview URL must start with http:// or https://')
+      setError({ message: 'Preview URL must start with http:// or https://', createdAt: Date.now() })
       setPreviewStatus({ kind: 'error', text: 'URL must start with http:// or https://' })
       return
     }
     previewActionPendingRef.current = true
     try {
-      await runAction('Opening preview', async () => {
+      await runAction('preview', 'Opening preview', async () => {
         setPreviewStatus({ kind: 'info', text: `Opening ${url}` })
         await window.claudeDesktop.preview.setUrl(url)
         if (activeSessionIdRef.current !== session.id) return
@@ -6982,7 +7344,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleOpenPreviewClick(): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     void openPreview()
   }
 
@@ -6991,19 +7353,19 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     const session = activeSession
     const url = previewUrl
     if (!session) {
-      setError('Start or select a session before opening a preview.')
+      setError({ message: 'Start or select a session before opening a preview.', createdAt: Date.now() })
       setPreviewStatus({ kind: 'error', text: 'Start or select a session before opening a preview.' })
       return
     }
     if (!isHttpUrl(url)) {
-      setError('External URL must start with http:// or https://')
+      setError({ message: 'External URL must start with http:// or https://', createdAt: Date.now() })
       setPreviewStatus({ kind: 'error', text: 'URL must start with http:// or https://' })
       return
     }
     previewActionPendingRef.current = true
     try {
       setError(undefined)
-      setLoadingLabel('Opening browser')
+      setLoading(prev => ({ ...prev, preview: 'Opening browser' }))
       setPreviewStatus({ kind: 'info', text: `Opening ${url} in browser...` })
       await window.claudeDesktop.preview.openExternal(url)
       if (activeSessionIdRef.current !== session.id) return
@@ -7011,16 +7373,16 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     } catch (cause) {
       if (activeSessionIdRef.current !== session.id) return
       const message = cause instanceof Error ? cause.message : String(cause)
-      setError(message)
+      setError({ message, createdAt: Date.now() })
       setPreviewStatus({ kind: 'error', text: message })
     } finally {
-      setLoadingLabel(undefined)
+      setLoading(prev => { const next = { ...prev }; delete next.preview; return next })
       previewActionPendingRef.current = false
     }
   }
 
   function handleOpenExternalPreviewClick(): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     void openExternalPreview()
   }
 
@@ -7028,19 +7390,19 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     if (externalLinkActionPendingRef.current) return
     const session = activeSession
     if (!session) {
-      setError('Start or select a session before opening a link.')
+      setError({ message: 'Start or select a session before opening a link.', createdAt: Date.now() })
       setConversationNotice({ kind: 'error', text: 'Start or select a session before opening a link.' })
       return
     }
     if (!isHttpUrl(url)) {
-      setError('External URL must start with http:// or https://')
+      setError({ message: 'External URL must start with http:// or https://', createdAt: Date.now() })
       setConversationNotice({ kind: 'error', text: 'URL must start with http:// or https://' })
       return
     }
     externalLinkActionPendingRef.current = true
     try {
       setError(undefined)
-      setLoadingLabel('Opening browser')
+      setLoading(prev => ({ ...prev, preview: 'Opening browser' }))
       setConversationNotice({ kind: 'info', text: `Opening ${url} in browser...` })
       await window.claudeDesktop.preview.openExternal(url)
       if (activeSessionIdRef.current !== session.id) return
@@ -7048,16 +7410,16 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     } catch (cause) {
       if (activeSessionIdRef.current !== session.id) return
       const message = cause instanceof Error ? cause.message : String(cause)
-      setError(message)
+      setError({ message, createdAt: Date.now() })
       setConversationNotice({ kind: 'error', text: message })
     } finally {
-      setLoadingLabel(undefined)
+      setLoading(prev => { const next = { ...prev }; delete next.preview; return next })
       externalLinkActionPendingRef.current = false
     }
   }
 
   async function saveProxySettings(): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     if (proxyActionPendingRef.current) return
     if (!canSaveProxy) {
       setSettingsStatus({
@@ -7068,7 +7430,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     }
     proxyActionPendingRef.current = true
     try {
-      await runAction('Saving proxy settings', async () => {
+      await runAction('config', 'Saving proxy settings', async () => {
         const saved = await window.claudeDesktop.config.updateProxy(proxyDraft)
         setProxyDraft(saved)
         await refreshDesktopConfig()
@@ -7080,22 +7442,22 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleSettingsRefreshClick(): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     void refreshSettingsConfig()
   }
 
   function handleDiagnosticsExportClick(): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     void exportDiagnostics()
   }
 
   function handleProxySaveClick(): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     void saveProxySettings()
   }
 
   function handleProxyEnabledChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     setProxyDraft(prev => ({
       ...prev,
       enabled: event.target.checked,
@@ -7103,7 +7465,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleProxyUrlChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     setProxyDraft(prev => ({
       ...prev,
       url: event.target.value,
@@ -7112,22 +7474,22 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
 
   async function runSkillAction(
     actionKey: string,
-    label: string,
+    scope: LoadingScope, label: string,
     action: () => Promise<void>,
   ): Promise<void> {
     if (skillActionPendingRef.current.has(actionKey)) return
     skillActionPendingRef.current.add(actionKey)
     try {
-      await runAction(label, action)
+      await runAction(scope, label, action)
     } finally {
       skillActionPendingRef.current.delete(actionKey)
     }
   }
 
   async function installLocalSkill(): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     const session = activeSession
-    await runSkillAction('user:install-local-skill', 'Installing skill', async () => {
+    await runSkillAction('mcp', 'user:install-local-skill', 'Installing skill', async () => {
       const installed = await window.claudeDesktop.skills.installLocal()
       if (installed) {
         setSelectedSkillDetail(installed)
@@ -7146,7 +7508,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function installProjectSkill(): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     if (!activeSession) {
       setSettingsStatus({
         kind: 'error',
@@ -7155,7 +7517,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
       return
     }
     const session = activeSession
-    await runSkillAction(`${session.id}:project:install-local-skill`, 'Installing project skill', async () => {
+    await runSkillAction('mcp', `${session.id}:project:install-local-skill`, 'Installing project skill', async () => {
       const installed = await window.claudeDesktop.workspaceSkills.installLocal(session.cwd)
       if (activeSessionIdRef.current !== session.id) return
       if (installed) {
@@ -7176,14 +7538,14 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function inspectUserSkill(skill: InstalledSkillInfo): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     const selectedSkillName = skill.name.trim()
     if (!selectedSkillName) {
       setSettingsStatus({ kind: 'error', text: 'Select a skill before inspecting.' })
       return
     }
     const session = activeSession
-    await runSkillAction(`user:read:${selectedSkillName}`, 'Reading skill', async () => {
+    await runSkillAction('mcp', `user:read:${selectedSkillName}`, 'Reading skill', async () => {
       const detail = await window.claudeDesktop.skills.read(selectedSkillName)
       setSelectedSkillDetail(detail)
       setSelectedSkillDetailScope('user')
@@ -7197,7 +7559,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function inspectProjectSkill(skill: InstalledSkillInfo): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     if (!activeSession) {
       setSettingsStatus({ kind: 'error', text: 'Select a session before editing project skills.' })
       return
@@ -7208,7 +7570,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
       return
     }
     const session = activeSession
-    await runSkillAction(`${session.id}:project:read:${selectedSkillName}`, 'Reading project skill', async () => {
+    await runSkillAction('mcp', `${session.id}:project:read:${selectedSkillName}`, 'Reading project skill', async () => {
       const detail = await window.claudeDesktop.workspaceSkills.read(session.cwd, selectedSkillName)
       if (activeSessionIdRef.current !== session.id) return
       setSelectedSkillDetail(detail)
@@ -7223,7 +7585,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function startNewUserSkillDraft(): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     const session = activeSession
     setSkillDraft(emptySkillDraft('user'))
     setSelectedSkillDetail(undefined)
@@ -7237,7 +7599,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function startNewProjectSkillDraft(): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     if (!activeSession) {
       setSettingsStatus({ kind: 'error', text: 'Select a session before creating project skills.' })
       return
@@ -7258,7 +7620,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     detail: InstalledSkillInfo,
     scope: 'user' | 'project',
   ): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     if (scope === 'project' && !activeSession) {
       setSettingsStatus({ kind: 'error', text: 'Select a session before editing project skills.' })
       return
@@ -7276,7 +7638,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     detail: InstalledSkillInfo,
     scope: 'user' | 'project',
   ): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     if (scope === 'project' && !activeSession) {
       setSettingsStatus({ kind: 'error', text: 'Select a session before editing project skills.' })
       return
@@ -7289,7 +7651,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleSelectedSkillDetailEditClick(): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     if (!selectedSkillDetail) {
       setSettingsStatus({ kind: 'error', text: 'Select a skill before editing.' })
       return
@@ -7301,7 +7663,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleSelectedSkillDetailRemoveClick(): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     if (!selectedSkillDetail) {
       setSettingsStatus({ kind: 'error', text: 'Select a skill before removing.' })
       return
@@ -7313,14 +7675,14 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function editUserSkill(skill: InstalledSkillInfo): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     const selectedSkillName = skill.name.trim()
     if (!selectedSkillName) {
       setSettingsStatus({ kind: 'error', text: 'Select a skill before editing.' })
       return
     }
     const session = activeSession
-    await runSkillAction(`user:edit:${selectedSkillName}`, 'Reading skill', async () => {
+    await runSkillAction('mcp', `user:edit:${selectedSkillName}`, 'Reading skill', async () => {
       const detail = await window.claudeDesktop.skills.read(selectedSkillName)
       setSelectedSkillDetail(detail)
       setSelectedSkillDetailScope('user')
@@ -7334,7 +7696,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function editProjectSkill(skill: InstalledSkillInfo): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     if (!activeSession) {
       setSettingsStatus({ kind: 'error', text: 'Select a session before editing project skills.' })
       return
@@ -7345,7 +7707,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
       return
     }
     const session = activeSession
-    await runSkillAction(`${session.id}:project:edit:${selectedSkillName}`, 'Reading project skill', async () => {
+    await runSkillAction('mcp', `${session.id}:project:edit:${selectedSkillName}`, 'Reading project skill', async () => {
       const detail = await window.claudeDesktop.workspaceSkills.read(session.cwd, selectedSkillName)
       if (activeSessionIdRef.current !== session.id) return
       setSelectedSkillDetail(detail)
@@ -7360,33 +7722,33 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function cancelSkillDraft(): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     setSkillDraft(undefined)
     setSettingsStatus({ kind: 'info', text: 'Cancelled skill edit.' })
   }
 
   function handleUserSkillNewClick(): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     startNewUserSkillDraft()
   }
 
   function handleProjectSkillNewClick(): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     startNewProjectSkillDraft()
   }
 
   function handleUserSkillInstallClick(): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     void installLocalSkill()
   }
 
   function handleProjectSkillInstallClick(): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     void installProjectSkill()
   }
 
   function handleSkillDraftNameChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (skillDraftSessionBlocked || loadingLabel) return
+    if (skillDraftSessionBlocked || isLoading('mcp')) return
     setSkillDraft(prev => prev ? {
       ...prev,
       name: event.target.value,
@@ -7394,7 +7756,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleSkillDraftScopeChange(event: ReactChangeEvent<HTMLSelectElement>): void {
-    if (skillDraftSessionBlocked || loadingLabel) return
+    if (skillDraftSessionBlocked || isLoading('mcp')) return
     setSkillDraft(prev => prev ? {
       ...prev,
       scope: event.target.value === 'project' ? 'project' : 'user',
@@ -7402,7 +7764,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleSkillDraftContentsChange(event: ReactChangeEvent<HTMLTextAreaElement>): void {
-    if (skillDraftSessionBlocked || loadingLabel) return
+    if (skillDraftSessionBlocked || isLoading('mcp')) return
     setSkillDraft(prev => prev ? {
       ...prev,
       contents: event.target.value,
@@ -7410,17 +7772,17 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleSkillSaveClick(): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     void saveSkillDraft()
   }
 
   function handleSkillCancelClick(): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     cancelSkillDraft()
   }
 
   function handleSkillRowClick(skill: InstalledSkillInfo, scope: 'user' | 'project'): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     if (scope === 'project') {
       void inspectProjectSkill(skill)
     } else {
@@ -7429,7 +7791,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleSkillInspectClick(skill: InstalledSkillInfo, scope: 'user' | 'project'): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     if (scope === 'project') {
       void inspectProjectSkill(skill)
     } else {
@@ -7438,7 +7800,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleSkillEditClick(skill: InstalledSkillInfo, scope: 'user' | 'project'): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     if (scope === 'project') {
       void editProjectSkill(skill)
     } else {
@@ -7447,7 +7809,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleSkillRemoveClick(skill: InstalledSkillInfo, scope: 'user' | 'project'): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     if (scope === 'project') {
       void removeProjectSkill(skill)
     } else {
@@ -7456,7 +7818,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function saveSkillDraft(): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     if (!skillDraft) {
       setSettingsStatus({ kind: 'error', text: 'Start or select a skill draft before saving.' })
       return
@@ -7523,7 +7885,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function removeUserSkill(skill: InstalledSkillInfo): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     const session = activeSession
     const removedSkillName = skill.name.trim()
     if (!removedSkillName) {
@@ -7566,7 +7928,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function removeProjectSkill(skill: InstalledSkillInfo): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     if (!activeSession) {
       setSettingsStatus({ kind: 'error', text: 'Select a session before editing project skills.' })
       return
@@ -7618,7 +7980,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function saveMcpServer(): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     const name = mcpDraft.name.trim()
     const scope = mcpDraft.scope as string
     if (!isUserProjectScope(scope)) {
@@ -7650,7 +8012,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     const actionKey = `${projectSession?.cwd ?? 'user'}:${scope}:save:${editingMcpName ?? name}`
     if (mcpActionPendingRef.current.has(actionKey)) return
     mcpActionPendingRef.current.add(actionKey)
-    await runAction('Saving MCP server', async () => {
+    await runAction('mcp', 'Saving MCP server', async () => {
       if (scope === 'project' && !projectSession) {
         throw new Error('Select a session before editing project MCP servers')
       }
@@ -7697,7 +8059,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function removeMcpServer(name: string, scope: 'user' | 'project'): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     const session = activeSession
     const projectSession = scope === 'project' ? session : undefined
     if (scope === 'project' && !projectSession) {
@@ -7723,7 +8085,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
         cancelLabel: 'Cancel',
         tone: 'danger',
       }))) return
-      await runAction('Removing MCP server', async () => {
+      await runAction('mcp', 'Removing MCP server', async () => {
         if (scope === 'project' && !projectSession) {
           throw new Error('Select a session before editing project MCP servers')
         }
@@ -7774,7 +8136,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function inspectUserMcp(server: McpServerInfo): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     const selectedMcpName = server.name.trim()
     if (!selectedMcpName) {
       setSettingsStatus({ kind: 'error', text: 'Select an MCP server before inspecting.' })
@@ -7784,7 +8146,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     if (mcpActionPendingRef.current.has(actionKey)) return
     mcpActionPendingRef.current.add(actionKey)
     const session = activeSession
-    await runAction('Reading MCP server', async () => {
+    await runAction('mcp', 'Reading MCP server', async () => {
       const detail = await window.claudeDesktop.mcp.read(selectedMcpName)
       setSelectedMcpDetail(detail)
       setSelectedMcpDetailScope('user')
@@ -7800,7 +8162,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function inspectProjectMcp(server: McpServerInfo): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     if (!activeSession) {
       setSettingsStatus({
         kind: 'error',
@@ -7817,7 +8179,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     const actionKey = `${session.cwd}:project-mcp:${selectedMcpName}:read`
     if (mcpActionPendingRef.current.has(actionKey)) return
     mcpActionPendingRef.current.add(actionKey)
-    await runAction('Reading project MCP server', async () => {
+    await runAction('mcp', 'Reading project MCP server', async () => {
       const detail = await window.claudeDesktop.workspaceMcp.read(session.cwd, selectedMcpName)
       if (activeSessionIdRef.current !== session.id) return
       setSelectedMcpDetail(detail)
@@ -7838,7 +8200,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     approved: boolean,
     scope: 'project' | 'user' = 'project',
   ): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     const selectedMcpName = server.name.trim()
     if (!selectedMcpName) {
       setSettingsStatus({ kind: 'error', text: 'Select a project MCP server before updating approval.' })
@@ -7902,7 +8264,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function setUserMcpEnabled(server: McpServerInfo, enabled: boolean): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     const selectedMcpName = server.name.trim()
     if (!selectedMcpName) {
       setSettingsStatus({ kind: 'error', text: 'Select an MCP server before enabling or disabling.' })
@@ -7940,22 +8302,22 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function toggleUserMcpServer(server: McpServerInfo): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     void setUserMcpEnabled(server, server.enabled === false)
   }
 
   function approveProjectMcpServer(server: McpServerInfo): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     void setProjectMcpApproval(server, true)
   }
 
   function rejectProjectMcpServer(server: McpServerInfo): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     void setProjectMcpApproval(server, false)
   }
 
   function setSelectedMcpDetailApproval(approved: boolean): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     if (!selectedMcpDetail) {
       setSettingsStatus({ kind: 'error', text: 'Select a project MCP server before updating approval.' })
       return
@@ -7968,12 +8330,12 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleSelectedMcpDetailApprovalClick(approved: boolean): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     setSelectedMcpDetailApproval(approved)
   }
 
   function handleSelectedMcpDetailEditClick(): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     if (!selectedMcpDetail) {
       setSettingsStatus({ kind: 'error', text: 'Select an MCP server before editing.' })
       return
@@ -7985,7 +8347,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleSelectedMcpDetailRemoveClick(): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     if (!selectedMcpDetail) {
       setSettingsStatus({ kind: 'error', text: 'Select an MCP server before removing.' })
       return
@@ -7997,7 +8359,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function editMcpServer(server: McpServerInfo, scope: 'user' | 'project'): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     if (scope === 'project' && !activeSession) {
       setSettingsStatus({
         kind: 'error',
@@ -8015,28 +8377,28 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function cancelMcpEdit(): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     setMcpDraft(emptyMcpDraft())
     setSettingsStatus({ kind: 'info', text: 'Cancelled MCP edit.' })
   }
 
   function handleMcpSaveClick(): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     void saveMcpServer()
   }
 
   function handleMcpHealthCheckClick(): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     void checkMcpHealth()
   }
 
   function handleMcpCancelEditClick(): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     cancelMcpEdit()
   }
 
   function handleMcpDraftNameChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (mcpDraftSessionBlocked || loadingLabel) return
+    if (mcpDraftSessionBlocked || isLoading('mcp')) return
     setMcpDraft(prev => ({
       ...prev,
       name: event.target.value,
@@ -8044,7 +8406,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleMcpDraftScopeChange(event: ReactChangeEvent<HTMLSelectElement>): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     setMcpDraft(prev => ({
       ...prev,
       scope: event.target.value === 'project' ? 'project' : 'user',
@@ -8052,7 +8414,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleMcpDraftModeChange(event: ReactChangeEvent<HTMLSelectElement>): void {
-    if (mcpDraftSessionBlocked || loadingLabel) return
+    if (mcpDraftSessionBlocked || isLoading('mcp')) return
     setMcpDraft(prev => ({
       ...prev,
       mode: event.target.value === 'remote' ? 'remote' : 'stdio',
@@ -8060,7 +8422,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleMcpDraftCommandChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (mcpDraftSessionBlocked || loadingLabel) return
+    if (mcpDraftSessionBlocked || isLoading('mcp')) return
     setMcpDraft(prev => ({
       ...prev,
       command: event.target.value,
@@ -8068,7 +8430,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleMcpDraftArgsChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (mcpDraftSessionBlocked || loadingLabel) return
+    if (mcpDraftSessionBlocked || isLoading('mcp')) return
     setMcpDraft(prev => ({
       ...prev,
       args: event.target.value,
@@ -8076,7 +8438,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleMcpDraftRemoteTypeChange(event: ReactChangeEvent<HTMLSelectElement>): void {
-    if (mcpDraftSessionBlocked || loadingLabel) return
+    if (mcpDraftSessionBlocked || isLoading('mcp')) return
     setMcpDraft(prev => ({
       ...prev,
       type: event.target.value === 'sse' ? 'sse' : 'streamable-http',
@@ -8084,7 +8446,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleMcpDraftRemoteUrlChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (mcpDraftSessionBlocked || loadingLabel) return
+    if (mcpDraftSessionBlocked || isLoading('mcp')) return
     setMcpDraft(prev => ({
       ...prev,
       url: event.target.value,
@@ -8092,17 +8454,17 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleMcpRowClick(server: McpServerInfo, scope: 'user' | 'project'): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     editMcpServer(server, scope)
   }
 
   function handleMcpEditClick(server: McpServerInfo, scope: 'user' | 'project'): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     editMcpServer(server, scope)
   }
 
   function handleMcpInspectClick(server: McpServerInfo, scope: 'user' | 'project'): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     if (scope === 'project') {
       void inspectProjectMcp(server)
     } else {
@@ -8111,12 +8473,12 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleMcpRemoveClick(server: McpServerInfo, scope: 'user' | 'project'): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     void removeMcpServer(server.name, scope)
   }
 
   function startNewMcpDraft(): void {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     const session = activeSession
     setMcpDraft(emptyMcpDraft())
     setSelectedMcpDetail(undefined)
@@ -8130,7 +8492,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function checkMcpHealth(): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('mcp')) return
     if (!activeSession) {
       setSettingsStatus({
         kind: 'error',
@@ -8143,7 +8505,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     const actionKey = `${cwd}:health-check`
     if (mcpActionPendingRef.current.has(actionKey)) return
     mcpActionPendingRef.current.add(actionKey)
-    await runAction('Checking MCP', async () => {
+    await runAction('mcp', 'Checking MCP', async () => {
       const result = await window.claudeDesktop.workspaceMcp.check(cwd)
       if (activeSessionIdRef.current !== session.id) return
       setMcpHealthOutput({
@@ -8169,13 +8531,13 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
 
   async function runPluginAction(
     actionKey: string,
-    label: string,
+    scope: LoadingScope, label: string,
     action: () => Promise<void>,
   ): Promise<void> {
     if (pluginActionPendingRef.current.has(actionKey)) return
     pluginActionPendingRef.current.add(actionKey)
     try {
-      await runAction(label, action)
+      await runAction(scope, label, action)
     } finally {
       pluginActionPendingRef.current.delete(actionKey)
     }
@@ -8212,7 +8574,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
       })
       return
     }
-    await runPluginAction(`${cwd}:${scope}:update:${pluginId}`, 'Updating plugin', async () => {
+    await runPluginAction('config', `${cwd}:${scope}:update:${pluginId}`, 'Updating plugin', async () => {
       const result = await window.claudeDesktop.plugins.update(cwd, {
         plugin: pluginId,
         scope,
@@ -8271,7 +8633,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
       return
     }
     const actionLabel = enabled ? 'Enabling plugin' : 'Disabling plugin'
-    await runPluginAction(`${cwd}:${scope}:${enabled ? 'enable' : 'disable'}:${pluginId}`, actionLabel, async () => {
+    await runPluginAction('config', `${cwd}:${scope}:${enabled ? 'enable' : 'disable'}:${pluginId}`, actionLabel, async () => {
       const result = await window.claudeDesktop.plugins.setEnabled(cwd, {
         plugin: pluginId,
         scope,
@@ -8339,7 +8701,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     })
     if (!confirmed) return
     const selectedIdentity = installedPluginIdentity(plugin)
-    await runPluginAction(`${cwd}:${scope}:uninstall:${pluginId}`, 'Removing plugin', async () => {
+    await runPluginAction('config', `${cwd}:${scope}:uninstall:${pluginId}`, 'Removing plugin', async () => {
       const result = await window.claudeDesktop.plugins.uninstall(cwd, {
         plugin: pluginId,
         scope,
@@ -8370,7 +8732,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function listAvailablePlugins(): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     const scope = pluginDraft.scope as string
     if (!isPluginScope(scope)) {
       setSettingsStatus({
@@ -8388,7 +8750,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
       })
       return
     }
-    await runPluginAction(`${cwd}:${scope}:list`, 'Listing plugins', async () => {
+    await runPluginAction('config', `${cwd}:${scope}:list`, 'Listing plugins', async () => {
       const result = await window.claudeDesktop.plugins.list(cwd)
       if ((scope === 'project' || scope === 'local') && activeSessionIdRef.current !== session?.id) return
       setPluginOutput({
@@ -8405,7 +8767,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function installPlugin(): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     const scope = pluginDraft.scope as string
     if (!isPluginScope(scope)) {
       setSettingsStatus({
@@ -8426,7 +8788,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
       })
       return
     }
-    await runPluginAction(`${cwd}:${scope}:install:${plugin}`, 'Installing plugin', async () => {
+    await runPluginAction('config', `${cwd}:${scope}:install:${plugin}`, 'Installing plugin', async () => {
       const result = await window.claudeDesktop.plugins.install(cwd, {
         plugin,
         scope,
@@ -8458,7 +8820,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function refreshAgents(): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     const session = activeSession
     const statusTarget = activePane === 'teams' ? 'teams' : 'agents'
     if (agentRefreshActionPendingRef.current) return
@@ -8469,7 +8831,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     const cwd = session?.cwd ?? ''
     agentRefreshActionPendingRef.current = true
     try {
-      await runAction('Refreshing agents', async () => {
+      await runAction('agents', 'Refreshing agents', async () => {
         const nextAgents = await window.claudeDesktop.agents.refresh(cwd)
         let nextTeams: TeamInfo[] | undefined
         if (session) {
@@ -8496,47 +8858,47 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentsRefreshClick(): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     void refreshAgents()
   }
 
   function handleTeamsSectionClick(): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     openPaneSection('teams', 'agents-teams', 'teams')
   }
 
   function handleAgentsOverviewSectionClick(): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     openPaneSection('agents', 'agents-sources', 'agents')
   }
 
   function handleAgentsCatalogSectionClick(): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     openPaneSection('agents', 'agents-catalog', 'agents')
   }
 
   function handleAgentsLaunchSectionClick(): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     openPaneSection('agents', 'agents-launch', 'agents')
   }
 
   function handleAgentsEditorSectionClick(): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     openPaneSection('agents', 'agents-editor', 'agents')
   }
 
   function handleAgentsTasksSectionClick(): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     openPaneSection('agents', 'agents-tasks', 'agents')
   }
 
   function handleAgentsActivitySectionClick(): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     openPaneSection('agents', 'agents-activity', 'agents')
   }
 
   function handleAgentLaunchAgentTypeChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (agentLaunchDraftSessionBlocked || loadingLabel) return
+    if (agentLaunchDraftSessionBlocked || isLoading('agents')) return
     setAgentLaunchDraft(prev => ({
       ...prev,
       agentType: event.target.value,
@@ -8544,7 +8906,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentLaunchModelChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (agentLaunchDraftSessionBlocked || loadingLabel) return
+    if (agentLaunchDraftSessionBlocked || isLoading('agents')) return
     setAgentLaunchDraft(prev => ({
       ...prev,
       model: event.target.value,
@@ -8552,7 +8914,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentLaunchPermissionModeChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (agentLaunchDraftSessionBlocked || loadingLabel) return
+    if (agentLaunchDraftSessionBlocked || isLoading('agents')) return
     setAgentLaunchDraft(prev => ({
       ...prev,
       permissionMode: event.target.value,
@@ -8560,7 +8922,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentLaunchDescriptionChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (agentLaunchDraftSessionBlocked || loadingLabel) return
+    if (agentLaunchDraftSessionBlocked || isLoading('agents')) return
     setAgentLaunchDraft(prev => ({
       ...prev,
       description: event.target.value,
@@ -8568,7 +8930,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentLaunchIsolationChange(event: ReactChangeEvent<HTMLSelectElement>): void {
-    if (agentLaunchDraftSessionBlocked || loadingLabel) return
+    if (agentLaunchDraftSessionBlocked || isLoading('agents')) return
     setAgentLaunchDraft(prev => ({
       ...prev,
       isolation: event.target.value === 'worktree' || event.target.value === 'remote'
@@ -8578,7 +8940,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentLaunchPromptChange(event: ReactChangeEvent<HTMLTextAreaElement>): void {
-    if (agentLaunchDraftSessionBlocked || loadingLabel) return
+    if (agentLaunchDraftSessionBlocked || isLoading('agents')) return
     setAgentLaunchDraft(prev => ({
       ...prev,
       prompt: event.target.value,
@@ -8586,7 +8948,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentLaunchNameChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (agentLaunchDraftSessionBlocked || loadingLabel) return
+    if (agentLaunchDraftSessionBlocked || isLoading('agents')) return
     setAgentLaunchDraft(prev => ({
       ...prev,
       name: event.target.value,
@@ -8594,7 +8956,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentLaunchTeamNameChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (agentLaunchDraftSessionBlocked || loadingLabel) return
+    if (agentLaunchDraftSessionBlocked || isLoading('agents')) return
     setAgentLaunchDraft(prev => ({
       ...prev,
       teamName: event.target.value,
@@ -8602,7 +8964,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentLaunchModeChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (agentLaunchDraftSessionBlocked || loadingLabel) return
+    if (agentLaunchDraftSessionBlocked || isLoading('agents')) return
     setAgentLaunchDraft(prev => ({
       ...prev,
       mode: event.target.value,
@@ -8610,7 +8972,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentLaunchRunInBackgroundChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (agentLaunchDraftSessionBlocked || loadingLabel) return
+    if (agentLaunchDraftSessionBlocked || isLoading('agents')) return
     setAgentLaunchDraft(prev => ({
       ...prev,
       runInBackground: event.target.checked,
@@ -8618,7 +8980,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentEditorTypeChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     setAgentDraft(prev => ({
       ...prev,
       agentType: event.target.value,
@@ -8626,7 +8988,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentEditorSourceChange(event: ReactChangeEvent<HTMLSelectElement>): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     setAgentDraft(prev => ({
       ...prev,
       source: event.target.value === 'user' ? 'user' : 'project',
@@ -8634,7 +8996,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentEditorWhenToUseChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     setAgentDraft(prev => ({
       ...prev,
       whenToUse: event.target.value,
@@ -8642,7 +9004,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentEditorModelChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     setAgentDraft(prev => ({
       ...prev,
       model: event.target.value,
@@ -8650,7 +9012,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentEditorPermissionModeChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     setAgentDraft(prev => ({
       ...prev,
       permissionMode: event.target.value,
@@ -8658,7 +9020,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentEditorToolsChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     setAgentDraft(prev => ({
       ...prev,
       tools: event.target.value,
@@ -8666,7 +9028,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentEditorDisallowedToolsChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     setAgentDraft(prev => ({
       ...prev,
       disallowedTools: event.target.value,
@@ -8674,7 +9036,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentEditorSkillsChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     setAgentDraft(prev => ({
       ...prev,
       skills: event.target.value,
@@ -8682,7 +9044,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentEditorMemoryChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     setAgentDraft(prev => ({
       ...prev,
       memory: event.target.value,
@@ -8690,7 +9052,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentEditorRequiredMcpServersChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     setAgentDraft(prev => ({
       ...prev,
       requiredMcpServers: event.target.value,
@@ -8698,7 +9060,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentEditorIsolationChange(event: ReactChangeEvent<HTMLSelectElement>): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     setAgentDraft(prev => ({
       ...prev,
       isolation: event.target.value === 'worktree' || event.target.value === 'remote'
@@ -8708,7 +9070,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentEditorPromptChange(event: ReactChangeEvent<HTMLTextAreaElement>): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     setAgentDraft(prev => ({
       ...prev,
       prompt: event.target.value,
@@ -8716,7 +9078,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentEditorBackgroundChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     setAgentDraft(prev => ({
       ...prev,
       background: event.target.checked,
@@ -8724,7 +9086,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function selectAgent(agent: AgentInfo): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     const agentType = agent.agentType.trim()
     if (!agentType) {
       setAgentsStatus({ kind: 'error', text: 'Select an agent before selecting.' })
@@ -8753,7 +9115,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function diagnoseSelectedAgent(): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     if (!activeSession) {
       setAgentsStatus({ kind: 'error', text: 'Select a session before diagnosing agents.' })
       return
@@ -8766,7 +9128,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentDiagnosticsMcpSettingsClick(): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     setMcpDraft(prev => ({
       ...prev,
       scope: 'project',
@@ -8776,12 +9138,12 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentDiagnosticsSkillsSettingsClick(): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     void openPaneSection('skills', 'skills-installed', 'skills')
   }
 
   function prepareSelectedAgentRun(): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     if (!activeSession) {
       setAgentsStatus({ kind: 'error', text: 'Select a session before running agents.' })
       return
@@ -8805,7 +9167,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function prepareSelectedAgentEdit(): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     if (!selectedAgent) {
       setAgentsStatus({ kind: 'error', text: 'Select an agent before editing.' })
       return
@@ -8842,7 +9204,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     if (agentDiagnosticActionPendingRef.current.has(actionKey)) return
     agentDiagnosticActionPendingRef.current.add(actionKey)
     try {
-      await runAction('Diagnosing agent', async () => {
+      await runAction('agents', 'Diagnosing agent', async () => {
         const diagnostics = await window.claudeDesktop.agents.diagnose(
           session.cwd,
           agentType,
@@ -8862,7 +9224,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function saveAgentDraft(): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     if (!activeSession && agentDraft.source === 'project') {
       setAgentsStatus({ kind: 'error', text: 'Select a session before managing project agents.' })
       return
@@ -8912,7 +9274,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function startNewAgentDraft(): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     const session = activeSession
     setAgentDraft(emptyAgentDraft())
     setSelectedAgentType(undefined)
@@ -8930,7 +9292,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function deleteSelectedAgent(agent: Pick<AgentInfo, 'agentType' | 'source'> = agentDraft): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     if (!activeSession && agent.source === 'project') {
       setAgentsStatus({ kind: 'error', text: 'Select a session before managing project agents.' })
       return
@@ -9011,29 +9373,29 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentEditorSaveClick(): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     void saveAgentDraft()
   }
 
   function handleAgentEditorNewClick(): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     startNewAgentDraft()
   }
 
   function handleAgentEditorDeleteClick(): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     void deleteSelectedAgent()
   }
 
   async function runAgentEditorAction(
     actionKey: string,
-    label: string,
+    scope: LoadingScope, label: string,
     action: () => Promise<void>,
   ): Promise<void> {
     if (agentEditorActionPendingRef.current.has(actionKey)) return
     agentEditorActionPendingRef.current.add(actionKey)
     try {
-      await runAction(label, action)
+      await runAction(scope, label, action)
     } finally {
       agentEditorActionPendingRef.current.delete(actionKey)
     }
@@ -9041,20 +9403,20 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
 
   async function runAgentLaunchAction(
     actionKey: string,
-    label: string,
+    scope: LoadingScope, label: string,
     action: () => Promise<void>,
   ): Promise<void> {
     if (agentLaunchActionPendingRef.current.has(actionKey)) return
     agentLaunchActionPendingRef.current.add(actionKey)
     try {
-      await runAction(label, action)
+      await runAction(scope, label, action)
     } finally {
       agentLaunchActionPendingRef.current.delete(actionKey)
     }
   }
 
   async function createAgentSession(): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     if (!activeSession) {
       setAgentsStatus({ kind: 'error', text: 'Select a session before creating agent sessions.' })
       return
@@ -9075,7 +9437,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
         canUseRemoteIsolation,
       ) || undefined,
     }
-    await runAgentLaunchAction(`${sessionId}:${agent.agentType}:create-session`, 'Creating agent session', async () => {
+    await runAgentLaunchAction('agents', `${sessionId}:${agent.agentType}:create-session`, 'Creating agent session', async () => {
       const createdSession = await window.claudeDesktop.sessions.create({
         cwd,
         agent,
@@ -9090,7 +9452,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function createSelectedAgentSession(): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     if (!activeSession) {
       setAgentsStatus({ kind: 'error', text: 'Select a session before creating agent sessions.' })
       return
@@ -9115,7 +9477,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
         canUseRemoteIsolation,
       ) || undefined,
     }
-    await runAgentLaunchAction(`${sessionId}:${agent.agentType}:selected-create-session`, 'Creating agent session', async () => {
+    await runAgentLaunchAction('agents', `${sessionId}:${agent.agentType}:selected-create-session`, 'Creating agent session', async () => {
       const createdSession = await window.claudeDesktop.sessions.create({
         cwd,
         agent,
@@ -9130,37 +9492,37 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleSelectedAgentDiagnoseClick(): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     void diagnoseSelectedAgent()
   }
 
   function handleSelectedAgentNewSessionClick(): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     void createSelectedAgentSession()
   }
 
   function handleSelectedAgentPrepareRunClick(): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     prepareSelectedAgentRun()
   }
 
   function handleSelectedAgentPrepareEditClick(): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     prepareSelectedAgentEdit()
   }
 
   function handleSelectedAgentDeleteClick(): void {
-    if (loadingLabel || !selectedAgent) return
+    if (isLoading('agents') || !selectedAgent) return
     void deleteSelectedAgent(selectedAgent)
   }
 
   function handleAgentLaunchCreateSessionClick(): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     void createAgentSession()
   }
 
   async function launchAgentTask(): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     if (!activeSession) {
       setAgentsStatus({
         kind: 'error',
@@ -9187,7 +9549,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     const session = activeSession
     const sessionId = session.id
     const input = agentLaunchInputFromDraft(agentLaunchDraft, canUseRemoteIsolation)
-    await runAgentLaunchAction(`${sessionId}:${input.agentType ?? 'fork'}:${input.description}:launch-task`, 'Launching agent task', async () => {
+    await runAgentLaunchAction('agents', `${sessionId}:${input.agentType ?? 'fork'}:${input.description}:launch-task`, 'Launching agent task', async () => {
       await window.claudeDesktop.sessions.launchAgentTask(
         sessionId,
         input,
@@ -9199,26 +9561,26 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentLaunchTaskClick(): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     void launchAgentTask()
   }
 
   async function runAgentTaskAction(
     actionKey: string,
-    label: string,
+    scope: LoadingScope, label: string,
     action: () => Promise<void>,
   ): Promise<void> {
     if (agentTaskActionPendingRef.current.has(actionKey)) return
     agentTaskActionPendingRef.current.add(actionKey)
     try {
-      await runAction(label, action)
+      await runAction(scope, label, action)
     } finally {
       agentTaskActionPendingRef.current.delete(actionKey)
     }
   }
 
   async function readAgentTaskOutput(taskId: string): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     if (!activeSession) {
       setAgentsStatus({ kind: 'error', text: 'Select a session before managing agent tasks.' })
       return
@@ -9237,7 +9599,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
       return
     }
     const sessionId = session.id
-    await runAgentTaskAction(`${sessionId}:${selectedAgentTaskId}:read`, 'Reading agent task output', async () => {
+    await runAgentTaskAction('agents', `${sessionId}:${selectedAgentTaskId}:read`, 'Reading agent task output', async () => {
       await window.claudeDesktop.sessions.readAgentTaskOutput(sessionId, {
         taskId: selectedAgentTaskId,
         block: false,
@@ -9250,7 +9612,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function previewAgentTaskOutput(taskId: string): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     if (!activeSession) {
       setAgentsStatus({ kind: 'error', text: 'Select a session before managing agent tasks.' })
       return
@@ -9262,7 +9624,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     }
     const session = activeSession
     const sessionId = session.id
-    await runAgentTaskAction(`${sessionId}:${selectedAgentTaskId}:preview`, 'Previewing agent output file', async () => {
+    await runAgentTaskAction('agents', `${sessionId}:${selectedAgentTaskId}:preview`, 'Previewing agent output file', async () => {
       const result = await window.claudeDesktop.sessions.previewAgentTaskOutput(
         sessionId,
         { taskId: selectedAgentTaskId },
@@ -9290,17 +9652,17 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentTaskReadOutputClick(taskId: string): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     void readAgentTaskOutput(taskId)
   }
 
   function handleAgentTaskPreviewOutputClick(taskId: string): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     void previewAgentTaskOutput(taskId)
   }
 
   async function stopAgentTask(taskId: string): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     if (!activeSession) {
       setAgentsStatus({ kind: 'error', text: 'Select a session before managing agent tasks.' })
       return
@@ -9319,7 +9681,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
       return
     }
     const sessionId = session.id
-    await runAgentTaskAction(`${sessionId}:${selectedAgentTaskId}:stop`, 'Stopping agent task', async () => {
+    await runAgentTaskAction('agents', `${sessionId}:${selectedAgentTaskId}:stop`, 'Stopping agent task', async () => {
       await window.claudeDesktop.sessions.stopAgentTask(sessionId, { taskId: selectedAgentTaskId })
       if (activeSessionIdRef.current !== session.id) return
       await updateSessionLayout(session.id, { selectedAgentTaskId })
@@ -9328,7 +9690,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function resumeAgentTask(taskId: string): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     if (!activeSession) {
       setAgentsStatus({ kind: 'error', text: 'Select a session before managing agent tasks.' })
       return
@@ -9351,7 +9713,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
       return
     }
     const sessionId = session.id
-    await runAgentTaskAction(`${sessionId}:${selectedAgentTaskId}:resume`, 'Resuming agent task', async () => {
+    await runAgentTaskAction('agents', `${sessionId}:${selectedAgentTaskId}:resume`, 'Resuming agent task', async () => {
       await window.claudeDesktop.sessions.resumeAgentTask(sessionId, {
         taskId: selectedAgentTaskId,
         prompt: agentTaskPrompt.trim(),
@@ -9364,36 +9726,36 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleAgentTaskStopClick(taskId: string): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     void stopAgentTask(taskId)
   }
 
   function handleAgentTaskResumeClick(taskId: string): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     void resumeAgentTask(taskId)
   }
 
   function handleAgentTaskPromptChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (agentTaskPromptSessionBlocked || loadingLabel) return
+    if (agentTaskPromptSessionBlocked || isLoading('agents')) return
     setAgentTaskPrompt(event.target.value)
   }
 
   async function runTeamAction(
     actionKey: string,
-    label: string,
+    scope: LoadingScope, label: string,
     action: () => Promise<void>,
   ): Promise<void> {
     if (teamActionPendingRef.current.has(actionKey)) return
     teamActionPendingRef.current.add(actionKey)
     try {
-      await runAction(label, action)
+      await runAction(scope, label, action)
     } finally {
       teamActionPendingRef.current.delete(actionKey)
     }
   }
 
   async function createTeam(): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     if (!activeSession) {
       setTeamsStatus({ kind: 'error', text: 'Select a session before managing teams.' })
       return
@@ -9406,7 +9768,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     const sessionId = session.id
     const cwd = session.cwd
     const input = teamCreateInputFromDraft(teamDraft)
-    await runTeamAction(`${sessionId}:${input.teamName}:create`, 'Creating team', async () => {
+    await runTeamAction('agents', `${sessionId}:${input.teamName}:create`, 'Creating team', async () => {
       await window.claudeDesktop.teams.create(
         sessionId,
         input,
@@ -9433,7 +9795,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function sendTeamMessage(): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     if (!activeSession) {
       setTeamsStatus({ kind: 'error', text: 'Select a session before managing teams.' })
       return
@@ -9452,7 +9814,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     }
     const sessionId = session.id
     const input = teamMessageInputFromDraft(teamDraft)
-    await runTeamAction(`${sessionId}:${input.teamName}:${input.to}:send`, 'Sending team message', async () => {
+    await runTeamAction('agents', `${sessionId}:${input.teamName}:${input.to}:send`, 'Sending team message', async () => {
       await window.claudeDesktop.teams.send(
         sessionId,
         input,
@@ -9475,7 +9837,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function spawnTeamTeammate(): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     if (!activeSession) {
       setTeamsStatus({ kind: 'error', text: 'Select a session before managing teams.' })
       return
@@ -9495,7 +9857,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     const sessionId = session.id
     const cwd = session.cwd
     const input = teamTeammateLaunchInputFromDraft(teamDraft)
-    await runTeamAction(`${sessionId}:${input.teamName}:${input.name}:spawn`, 'Spawning teammate', async () => {
+    await runTeamAction('agents', `${sessionId}:${input.teamName}:${input.name}:spawn`, 'Spawning teammate', async () => {
       await window.claudeDesktop.sessions.launchAgentTask(
         sessionId,
         input,
@@ -9522,7 +9884,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function requestTeamShutdown(inputOverride?: TeamShutdownInput): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     const rawInput = inputOverride ?? teamShutdownInputFromDraft(teamDraft)
     const input: TeamShutdownInput = {
       teamName: rawInput.teamName.trim(),
@@ -9546,7 +9908,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
       return
     }
     const sessionId = session.id
-    await runTeamAction(`${sessionId}:${input.teamName}:${input.to}:shutdown`, 'Requesting teammate shutdown', async () => {
+    await runTeamAction('agents', `${sessionId}:${input.teamName}:${input.to}:shutdown`, 'Requesting teammate shutdown', async () => {
       await window.claudeDesktop.teams.shutdown(
         sessionId,
         input,
@@ -9569,7 +9931,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function requestTeamMemberShutdown(team: TeamInfo, member: TeamMemberInfo): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     if (!activeSession) {
       setTeamsStatus({ kind: 'error', text: 'Select a session before managing teams.' })
       return
@@ -9588,7 +9950,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function removeTeamMember(team: TeamInfo, member: TeamMemberInfo): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     if (!activeSession) {
       setTeamsStatus({ kind: 'error', text: 'Select a session before managing teams.' })
       return
@@ -9646,7 +10008,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function selectTeam(team: TeamInfo): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     if (!activeSession) {
       setTeamsStatus({ kind: 'error', text: 'Select a session before managing teams.' })
       return
@@ -9673,7 +10035,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function selectTeamMember(team: TeamInfo, member: TeamMemberInfo): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     if (!activeSession) {
       setTeamsStatus({ kind: 'error', text: 'Select a session before managing teams.' })
       return
@@ -9695,7 +10057,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function prepareTeamMemberMessage(team: TeamInfo, member: TeamMemberInfo): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     if (!activeSession) {
       setTeamsStatus({ kind: 'error', text: 'Select a session before managing teams.' })
       return
@@ -9725,7 +10087,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function prepareTeamBroadcastMessage(team: TeamInfo): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     if (!activeSession) {
       setTeamsStatus({ kind: 'error', text: 'Select a session before managing teams.' })
       return
@@ -9754,7 +10116,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleTeamDraftTeamNameChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (teamDraftSessionBlocked || loadingLabel) return
+    if (teamDraftSessionBlocked || isLoading('agents')) return
     setTeamDraft(prev => ({
       ...prev,
       teamName: event.target.value,
@@ -9762,7 +10124,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleTeamDraftAgentTypeChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (teamDraftSessionBlocked || loadingLabel) return
+    if (teamDraftSessionBlocked || isLoading('agents')) return
     setTeamDraft(prev => ({
       ...prev,
       agentType: event.target.value,
@@ -9770,7 +10132,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleTeamDraftDescriptionChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (teamDraftSessionBlocked || loadingLabel) return
+    if (teamDraftSessionBlocked || isLoading('agents')) return
     setTeamDraft(prev => ({
       ...prev,
       description: event.target.value,
@@ -9778,7 +10140,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleTeamDraftTeammateAgentTypeChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (teamDraftSessionBlocked || loadingLabel) return
+    if (teamDraftSessionBlocked || isLoading('agents')) return
     setTeamDraft(prev => ({
       ...prev,
       teammateAgentType: event.target.value,
@@ -9786,7 +10148,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleTeamDraftTeammateNameChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (teamDraftSessionBlocked || loadingLabel) return
+    if (teamDraftSessionBlocked || isLoading('agents')) return
     setTeamDraft(prev => ({
       ...prev,
       teammateName: event.target.value,
@@ -9794,7 +10156,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleTeamDraftTeammateModeChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (teamDraftSessionBlocked || loadingLabel) return
+    if (teamDraftSessionBlocked || isLoading('agents')) return
     setTeamDraft(prev => ({
       ...prev,
       teammateMode: event.target.value,
@@ -9802,7 +10164,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleTeamDraftTeammatePromptChange(event: ReactChangeEvent<HTMLTextAreaElement>): void {
-    if (teamDraftSessionBlocked || loadingLabel) return
+    if (teamDraftSessionBlocked || isLoading('agents')) return
     setTeamDraft(prev => ({
       ...prev,
       teammatePrompt: event.target.value,
@@ -9810,7 +10172,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleTeamDraftMessageRecipientChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (teamDraftSessionBlocked || loadingLabel) return
+    if (teamDraftSessionBlocked || isLoading('agents')) return
     setTeamDraft(prev => ({
       ...prev,
       to: event.target.value,
@@ -9818,7 +10180,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleTeamDraftShutdownReasonChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (teamDraftSessionBlocked || loadingLabel) return
+    if (teamDraftSessionBlocked || isLoading('agents')) return
     setTeamDraft(prev => ({
       ...prev,
       shutdownReason: event.target.value,
@@ -9826,7 +10188,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleTeamDraftMessageChange(event: ReactChangeEvent<HTMLTextAreaElement>): void {
-    if (teamDraftSessionBlocked || loadingLabel) return
+    if (teamDraftSessionBlocked || isLoading('agents')) return
     setTeamDraft(prev => ({
       ...prev,
       message: event.target.value,
@@ -9834,42 +10196,42 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleTeamRowSelectClick(team: TeamInfo): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     selectTeam(team)
   }
 
   function handleTeamRowMessageAllClick(team: TeamInfo): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     prepareTeamBroadcastMessage(team)
   }
 
   function handleTeamRowDeleteClick(team: TeamInfo): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     void deleteTeam(team)
   }
 
   function handleTeamMemberSelectClick(team: TeamInfo, member: TeamMemberInfo): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     selectTeamMember(team, member)
   }
 
   function handleTeamMemberMessageClick(team: TeamInfo, member: TeamMemberInfo): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     prepareTeamMemberMessage(team, member)
   }
 
   function handleTeamMemberShutdownClick(team: TeamInfo, member: TeamMemberInfo): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     void requestTeamMemberShutdown(team, member)
   }
 
   function handleTeamMemberRemoveClick(team: TeamInfo, member: TeamMemberInfo): void {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     void removeTeamMember(team, member)
   }
 
   async function deleteTeam(team: Pick<TeamInfo, 'name'> = { name: teamDraft.teamName }): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('agents')) return
     if (!activeSession) {
       setTeamsStatus({ kind: 'error', text: 'Select a session before managing teams.' })
       return
@@ -9927,32 +10289,32 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleTeamFormCreateClick(): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     void createTeam()
   }
 
   function handleTeamFormSpawnTeammateClick(): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     void spawnTeamTeammate()
   }
 
   function handleTeamFormSendClick(): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     void sendTeamMessage()
   }
 
   function handleTeamFormShutdownClick(): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     void requestTeamShutdown()
   }
 
   function handleTeamFormDeleteClick(): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     void deleteTeam()
   }
 
   async function saveScheduledTask(): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     if (!canSaveTask) {
       setScheduledTaskStatus({
         kind: 'error',
@@ -9975,7 +10337,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function removeScheduledTask(taskId: string): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     const removedTaskId = taskId.trim()
     if (!removedTaskId) {
       setScheduledTaskStatus({ kind: 'error', text: 'Select a scheduled task before removing.' })
@@ -10010,7 +10372,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function toggleScheduledTaskEnabled(task: ScheduledTaskInfo): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     const updatedGlobalTaskId = task.id.trim()
     if (!updatedGlobalTaskId) {
       setScheduledTaskStatus({ kind: 'error', text: 'Select a scheduled task before pausing or resuming.' })
@@ -10021,7 +10383,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     const actionLabel = nextEnabled ? 'Resuming scheduled task' : 'Pausing scheduled task'
     const statusTarget = currentScheduledTaskStatusTarget()
     const session = activeSession
-    await runScheduledTaskAction(`global:${updatedGlobalTaskId}:${nextEnabled ? 'resume' : 'pause'}`, actionLabel, async () => {
+    await runScheduledTaskAction('config', `global:${updatedGlobalTaskId}:${nextEnabled ? 'resume' : 'pause'}`, actionLabel, async () => {
       const tasks = nextEnabled
         ? await window.claudeDesktop.tasks.resume(updatedGlobalTaskId)
         : await window.claudeDesktop.tasks.pause(updatedGlobalTaskId)
@@ -10039,7 +10401,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function editScheduledTask(task: ScheduledTaskInfo): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     const session = activeSession
     const editedGlobalTaskId = task.id.trim()
     if (!editedGlobalTaskId) {
@@ -10052,7 +10414,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function cancelScheduledTaskEdit(): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     const session = activeSession
     setTaskDraft(emptyTaskDraft())
     if (session) void updateSessionLayout(session.id, { selectedGlobalTaskId: undefined })
@@ -10060,7 +10422,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function startNewScheduledTaskDraft(): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     const session = activeSession
     setTaskDraft(emptyTaskDraft())
     if (session) void updateSessionLayout(session.id, { selectedGlobalTaskId: undefined })
@@ -10069,13 +10431,13 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
 
   async function runScheduledTaskAction(
     actionKey: string,
-    label: string,
+    scope: LoadingScope, label: string,
     action: () => Promise<void>,
   ): Promise<void> {
     if (scheduledTaskActionPendingRef.current.has(actionKey)) return
     scheduledTaskActionPendingRef.current.add(actionKey)
     try {
-      await runAction(label, action)
+      await runAction(scope, label, action)
     } finally {
       scheduledTaskActionPendingRef.current.delete(actionKey)
     }
@@ -10094,7 +10456,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function runScheduledTaskNow(task: ScheduledTaskInfo): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     if (!activeSession) {
       setScheduledTaskStatus({
         kind: 'error',
@@ -10131,7 +10493,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     const sessionId = session.id
     const label = task.name || queuedTaskId
     const statusTarget = currentScheduledTaskStatusTarget()
-    await runScheduledTaskAction(`${sessionId}:global:${queuedTaskId}:run-now`, 'Running scheduled task', async () => {
+    await runScheduledTaskAction('config', `${sessionId}:global:${queuedTaskId}:run-now`, 'Running scheduled task', async () => {
       await window.claudeDesktop.sessions.send(sessionId, queuedPrompt)
       if (activeSessionIdRef.current !== session.id) return
       setTaskDraft({ ...taskDraftFromTask(task), id: queuedTaskId })
@@ -10141,42 +10503,42 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleScheduledTaskSaveClick(): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     void saveScheduledTask()
   }
 
   function handleScheduledTaskCancelClick(): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     cancelScheduledTaskEdit()
   }
 
   function handleScheduledTaskRowClick(task: ScheduledTaskInfo): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     editScheduledTask(task)
   }
 
   function handleScheduledTaskEditClick(task: ScheduledTaskInfo): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     editScheduledTask(task)
   }
 
   function handleScheduledTaskToggleClick(task: ScheduledTaskInfo): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     void toggleScheduledTaskEnabled(task)
   }
 
   function handleScheduledTaskRunClick(task: ScheduledTaskInfo): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     void runScheduledTaskNow(task)
   }
 
   function handleScheduledTaskRemoveClick(task: ScheduledTaskInfo): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     void removeScheduledTask(task.id)
   }
 
   async function saveProjectScheduledTask(): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     if (!activeSession) {
       setScheduledTaskStatus({
         kind: 'error',
@@ -10214,7 +10576,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function removeProjectScheduledTask(taskId: string): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     if (!activeSession) {
       setScheduledTaskStatus({
         kind: 'error',
@@ -10262,7 +10624,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function toggleProjectScheduledTaskEnabled(task: ProjectScheduledTaskInfo): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     if (!activeSession) {
       setScheduledTaskStatus({
         kind: 'error',
@@ -10278,7 +10640,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     const session = activeSession
     const nextEnabled = !task.enabled
     const statusTarget = currentScheduledTaskStatusTarget()
-    await runScheduledTaskAction(`${session.id}:project:${updatedTaskId}:${nextEnabled ? 'resume' : 'pause'}`, `${nextEnabled ? 'Resuming' : 'Pausing'} project scheduled task`, async () => {
+    await runScheduledTaskAction('config', `${session.id}:project:${updatedTaskId}:${nextEnabled ? 'resume' : 'pause'}`, `${nextEnabled ? 'Resuming' : 'Pausing'} project scheduled task`, async () => {
       const tasks = nextEnabled
         ? await window.claudeDesktop.workspaceTasks.resume(session.cwd, updatedTaskId)
         : await window.claudeDesktop.workspaceTasks.pause(session.cwd, updatedTaskId)
@@ -10299,7 +10661,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function editProjectScheduledTask(task: ProjectScheduledTaskInfo): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     if (!activeSession) {
       setScheduledTaskStatus({
         kind: 'error',
@@ -10319,7 +10681,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function cancelProjectScheduledTaskEdit(): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     const session = activeSession
     setProjectTaskDraft(emptyProjectTaskDraft())
     if (session) void updateSessionLayout(session.id, { selectedProjectTaskId: undefined })
@@ -10327,7 +10689,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function startNewProjectScheduledTaskDraft(): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     if (!activeSession) {
       setTasksStatus({ kind: 'error', text: 'Select a session before creating project scheduled tasks.' })
       return
@@ -10339,7 +10701,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   async function runProjectScheduledTaskNow(task: ProjectScheduledTaskInfo): Promise<void> {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     if (!activeSession) {
       setScheduledTaskStatus({
         kind: 'error',
@@ -10374,7 +10736,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     }
     const sessionId = session.id
     const statusTarget = currentScheduledTaskStatusTarget()
-    await runScheduledTaskAction(`${sessionId}:project:${queuedProjectTaskId}:run-now`, 'Running scheduled task', async () => {
+    await runScheduledTaskAction('config', `${sessionId}:project:${queuedProjectTaskId}:run-now`, 'Running scheduled task', async () => {
       await window.claudeDesktop.sessions.send(sessionId, queuedProjectPrompt)
       if (activeSessionIdRef.current !== session.id) return
       setProjectTaskDraft({ ...projectTaskDraftFromTask(task), id: queuedProjectTaskId })
@@ -10384,42 +10746,42 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleProjectScheduledTaskSaveClick(): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     void saveProjectScheduledTask()
   }
 
   function handleProjectScheduledTaskCancelClick(): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     cancelProjectScheduledTaskEdit()
   }
 
   function handleProjectScheduledTaskRowClick(task: ProjectScheduledTaskInfo): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     editProjectScheduledTask(task)
   }
 
   function handleProjectScheduledTaskEditClick(task: ProjectScheduledTaskInfo): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     editProjectScheduledTask(task)
   }
 
   function handleProjectScheduledTaskToggleClick(task: ProjectScheduledTaskInfo): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     void toggleProjectScheduledTaskEnabled(task)
   }
 
   function handleProjectScheduledTaskRunClick(task: ProjectScheduledTaskInfo): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     void runProjectScheduledTaskNow(task)
   }
 
   function handleProjectScheduledTaskRemoveClick(task: ProjectScheduledTaskInfo): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     void removeProjectScheduledTask(task.id)
   }
 
   function handleProjectTaskCronChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     setProjectTaskDraft(prev => ({
       ...prev,
       cron: event.target.value,
@@ -10427,7 +10789,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleProjectTaskRecurringChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     setProjectTaskDraft(prev => ({
       ...prev,
       recurring: event.target.checked,
@@ -10435,7 +10797,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleProjectTaskPromptChange(event: ReactChangeEvent<HTMLTextAreaElement>): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     setProjectTaskDraft(prev => ({
       ...prev,
       prompt: event.target.value,
@@ -10443,7 +10805,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleScheduledTaskNameChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     setTaskDraft(prev => ({
       ...prev,
       name: event.target.value,
@@ -10451,7 +10813,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleScheduledTaskScheduleChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     setTaskDraft(prev => ({
       ...prev,
       schedule: event.target.value,
@@ -10459,7 +10821,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleScheduledTaskPromptChange(event: ReactChangeEvent<HTMLTextAreaElement>): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     setTaskDraft(prev => ({
       ...prev,
       prompt: event.target.value,
@@ -10467,7 +10829,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handleScheduledTaskEnabledChange(event: ReactChangeEvent<HTMLInputElement>): void {
-    if (loadingLabel) return
+    if (isLoading('config')) return
     setTaskDraft(prev => ({
       ...prev,
       enabled: event.target.checked,
@@ -10487,14 +10849,14 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                   onChange={handleProjectTaskCronChange}
                   placeholder="0 9 * * *"
                   aria-label="Project task cron schedule"
-                  disabled={!!loadingLabel}
+                  disabled={isLoading('config')}
                 />
                 <label className="toggle-row compact">
                   <input
                     type="checkbox"
                     checked={projectTaskDraft.recurring}
                     aria-label="Project task recurring"
-                    disabled={!!loadingLabel}
+                    disabled={isLoading('config')}
                     onChange={handleProjectTaskRecurringChange}
                   />
                   Recurring
@@ -10505,7 +10867,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                 onChange={handleProjectTaskPromptChange}
                 placeholder="Prompt to run on this schedule"
                 aria-label="Project task prompt"
-                disabled={!!loadingLabel}
+                disabled={isLoading('config')}
               />
               {projectTaskCronInvalid && (
                 <div className="form-note">
@@ -10513,11 +10875,11 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                 </div>
               )}
               <div className="section-actions">
-                <button className="tool-button" onClick={handleProjectScheduledTaskSaveClick} disabled={!canSaveProjectTask || !!loadingLabel}>
+                <button className="tool-button" onClick={handleProjectScheduledTaskSaveClick} disabled={!canSaveProjectTask || isLoading('config')}>
                   <Icon name="save" />{projectTaskDraft.id ? 'Update project task' : 'Add project task'}
                 </button>
                 {projectTaskDraft.id && (
-                  <button className="tool-button" onClick={handleProjectScheduledTaskCancelClick} disabled={!!loadingLabel}>
+                  <button className="tool-button" onClick={handleProjectScheduledTaskCancelClick} disabled={isLoading('config')}>
                     <Icon name="x" />Cancel edit
                   </button>
                 )}
@@ -10532,8 +10894,8 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                     id={projectScheduledTaskOptionId(task)}
                     role="option"
                     aria-selected={isProjectScheduledTaskItemActive(task)}
-                    aria-disabled={!activeSession || !!loadingLabel}
-                    tabIndex={!activeSession || loadingLabel ? -1 : 0}
+                    aria-disabled={!activeSession || isLoading('config')}
+                    tabIndex={!activeSession || isLoading('config') ? -1 : 0}
                     onClick={() => handleProjectScheduledTaskRowClick(task)}
                     onKeyDown={event => handleProjectScheduledTaskRowKeyDown(event, task)}
                   >
@@ -10544,16 +10906,16 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                   </small>
                   <p>{task.prompt}</p>
                   <div className="section-actions" onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
-                    <button className="tool-button" onClick={() => handleProjectScheduledTaskEditClick(task)} disabled={!activeSession || !!loadingLabel}>
+                    <button className="tool-button" onClick={() => handleProjectScheduledTaskEditClick(task)} disabled={!activeSession || isLoading('config')}>
                       <Icon name="pencil" />Edit
                     </button>
-                    <button className="tool-button" onClick={() => handleProjectScheduledTaskToggleClick(task)} disabled={!activeSession || !!loadingLabel}>
+                    <button className="tool-button" onClick={() => handleProjectScheduledTaskToggleClick(task)} disabled={!activeSession || isLoading('config')}>
                       <Icon name={task.enabled ? 'pause' : 'play'} />{task.enabled ? 'Pause' : 'Resume'}
                     </button>
-                    <button className="tool-button" onClick={() => handleProjectScheduledTaskRunClick(task)} disabled={!activeSession || !task.enabled || !canQueueRuntimePrompt || !!loadingLabel}>
+                    <button className="tool-button" onClick={() => handleProjectScheduledTaskRunClick(task)} disabled={!activeSession || !task.enabled || !canQueueRuntimePrompt || isLoading('config')}>
                       <Icon name="play" />Run now
                     </button>
-                    <button className="tool-button danger" onClick={() => handleProjectScheduledTaskRemoveClick(task)} disabled={!activeSession || !!loadingLabel}>
+                    <button className="tool-button danger" onClick={() => handleProjectScheduledTaskRemoveClick(task)} disabled={!activeSession || isLoading('config')}>
                       <Icon name="trash" />Remove
                     </button>
                   </div>
@@ -10590,14 +10952,14 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
               onChange={handleScheduledTaskNameChange}
               placeholder="task name"
               aria-label="Scheduled task name"
-              disabled={!!loadingLabel}
+              disabled={isLoading('config')}
             />
             <input
               value={taskDraft.schedule}
               onChange={handleScheduledTaskScheduleChange}
               placeholder="schedule"
               aria-label="Scheduled task schedule"
-              disabled={!!loadingLabel}
+              disabled={isLoading('config')}
             />
           </div>
           <textarea
@@ -10605,7 +10967,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
             onChange={handleScheduledTaskPromptChange}
             placeholder="prompt"
             aria-label="Scheduled task prompt"
-            disabled={!!loadingLabel}
+            disabled={isLoading('config')}
           />
           {taskScheduleInvalid && (
             <div className="form-note">
@@ -10618,16 +10980,16 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                 type="checkbox"
                 checked={taskDraft.enabled}
                 aria-label="Scheduled task enabled"
-                disabled={!!loadingLabel}
+                disabled={isLoading('config')}
                 onChange={handleScheduledTaskEnabledChange}
               />
               Enabled
             </label>
-            <button className="tool-button" onClick={handleScheduledTaskSaveClick} disabled={!canSaveTask || !!loadingLabel}>
+            <button className="tool-button" onClick={handleScheduledTaskSaveClick} disabled={!canSaveTask || isLoading('config')}>
               <Icon name="save" />{taskDraft.id ? 'Update task' : 'Add task'}
             </button>
             {taskDraft.id && (
-              <button className="tool-button" onClick={handleScheduledTaskCancelClick} disabled={!!loadingLabel}>
+              <button className="tool-button" onClick={handleScheduledTaskCancelClick} disabled={isLoading('config')}>
                 <Icon name="x" />Cancel edit
               </button>
             )}
@@ -10642,8 +11004,8 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                 id={scheduledTaskOptionId(task)}
                 role="option"
                 aria-selected={isScheduledTaskItemActive(task)}
-                aria-disabled={!!loadingLabel}
-                tabIndex={loadingLabel ? -1 : 0}
+                aria-disabled={isLoading('config')}
+                tabIndex={isLoading('workspace') ? -1 : 0}
                 onClick={() => handleScheduledTaskRowClick(task)}
                 onKeyDown={event => handleScheduledTaskRowKeyDown(event, task)}
               >
@@ -10651,16 +11013,16 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
               <small>{task.enabled ? 'enabled' : 'disabled'} · {task.schedule || 'manual schedule'}</small>
               <p>{task.prompt}</p>
               <div className="section-actions" onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
-                <button className="tool-button" onClick={() => handleScheduledTaskEditClick(task)} disabled={!!loadingLabel}>
+                <button className="tool-button" onClick={() => handleScheduledTaskEditClick(task)} disabled={isLoading('config')}>
                   <Icon name="pencil" />Edit
                 </button>
-                <button className="tool-button" onClick={() => handleScheduledTaskToggleClick(task)} disabled={!!loadingLabel}>
+                <button className="tool-button" onClick={() => handleScheduledTaskToggleClick(task)} disabled={isLoading('config')}>
                   <Icon name={task.enabled ? 'pause' : 'play'} />{task.enabled ? 'Pause' : 'Resume'}
                 </button>
-                <button className="tool-button" onClick={() => handleScheduledTaskRunClick(task)} disabled={!task.enabled || !canQueueRuntimePrompt || !!loadingLabel}>
+                <button className="tool-button" onClick={() => handleScheduledTaskRunClick(task)} disabled={!task.enabled || !canQueueRuntimePrompt || isLoading('config')}>
                   <Icon name="play" />Run now
                 </button>
-                <button className="tool-button danger" onClick={() => handleScheduledTaskRemoveClick(task)} disabled={!!loadingLabel}>
+                <button className="tool-button danger" onClick={() => handleScheduledTaskRemoveClick(task)} disabled={isLoading('config')}>
                   <Icon name="trash" />Remove
                 </button>
               </div>
@@ -10683,7 +11045,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
       setConversationNotice({ kind: 'error', text: 'Select a session before resizing the workspace.' })
       return
     }
-    if (!!loadingLabel || !workspaceRef.current) return
+    if (isLoading('session') || !workspaceRef.current) return
     const sessionId = activeSession.id
     const bounds = workspaceRef.current.getBoundingClientRect()
     let latestRatio = workspaceRatio
@@ -10712,7 +11074,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
       setConversationNotice({ kind: 'error', text: 'Select a session before resizing the workspace.' })
       return
     }
-    if (loadingLabel) return
+    if (isLoading('session')) return
     const sessionId = activeSession.id
     const keyRatios: Record<string, number> = {
       ArrowLeft: workspaceRatio + KEYBOARD_RESIZE_STEP,
@@ -10730,7 +11092,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     if (
       !pendingPermission ||
       respondingPermissionId ||
-      loadingLabel ||
+      loading ||
       permissionActionPendingRef.current
     ) return
     const request = pendingPermission
@@ -10762,12 +11124,12 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   }
 
   function handlePermissionCancelTurnClick(): void {
-    if (loadingLabel || permissionResponding) return
+    if (isLoading('session') || permissionResponding) return
     void cancelSession()
   }
 
   function handlePermissionResponseClick(behavior: 'allow' | 'deny'): void {
-    if (loadingLabel || permissionResponding) return
+    if (isLoading('session') || permissionResponding) return
     void respondToPermission(behavior)
   }
 
@@ -10788,7 +11150,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
             aria-controls="session-create-menu"
             aria-expanded={Boolean(sessionCreateMenu)}
             data-tooltip="New session"
-            disabled={!!loadingLabel}
+            disabled={isLoading('session')}
           >
             <Icon name="plus" />
           </button>
@@ -10834,7 +11196,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
             onClick={handleSessionsCollapseClick}
             aria-expanded={!sessionsCollapsed}
             aria-label={`Sessions, ${sessions.length} ${sessions.length === 1 ? 'session' : 'sessions'}, ${sessionsCollapsed ? 'collapsed' : 'expanded'}`}
-            disabled={!!loadingLabel}
+            disabled={isLoading('session')}
           >
             <span className="rail-section-label">
               <span>Sessions</span>
@@ -10849,16 +11211,32 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                   key={session.id}
                   className="session-row-shell"
                   onContextMenu={event => openSessionMenuForRow(event, session.id)}
+                  onDoubleClick={() => startRenameSession(session.id)}
                 >
                   <button
-                    className={`session-row ${session.id === activeSessionId ? 'active' : ''}`}
+                    className={`session-row ${session.id === activeSessionId ? 'active' : ''} ${session.activity === 'streaming' ? 'streaming' : ''}`}
                     aria-current={session.id === activeSessionId ? 'true' : undefined}
                     onClick={() => handleSessionRowClick(session.id)}
-                    disabled={!!loadingLabel}
+                    disabled={isLoading('session')}
                   >
                     <span className={`status-dot ${session.status} ${session.activity}`} />
                     <span className="session-copy">
-                      <strong>{session.title}</strong>
+                      {renamingSessionId === session.id ? (
+                        <input
+                          ref={renameInputRef}
+                          className="session-rename-input"
+                          value={renameValue}
+                          onChange={e => setRenameValue(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') { e.preventDefault(); commitRenameSession() }
+                            if (e.key === 'Escape') { e.preventDefault(); cancelRenameSession() }
+                          }}
+                          onBlur={commitRenameSession}
+                          aria-label="Rename session"
+                        />
+                      ) : (
+                        <strong>{session.title}</strong>
+                      )}
                       <small>{sessionActivityLabel(session)} · {session.cwd}</small>
                     </span>
                     <span className="session-time">{formatTime(session.updatedAt)}</span>
@@ -10873,7 +11251,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                     aria-expanded={sessionMenu?.sessionId === session.id}
                     data-tooltip="Manage session"
                     onClick={event => openSessionMenuForRow(event, session.id)}
-                    disabled={!!loadingLabel}
+                    disabled={isLoading('session')}
                   >
                     <Icon name="more" />
                   </button>
@@ -10893,6 +11271,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
 
       {sessionCreateMenu && (
         <div
+          ref={sessionCreateMenuRef}
           id="session-create-menu"
           className="session-context-menu session-create-menu"
           style={{ left: sessionCreateMenu.x, top: sessionCreateMenu.y }}
@@ -10905,8 +11284,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
             id={sessionCreateMenuItemIds[0]}
             role="menuitem"
             {...menuItemState(sessionCreateMenuActiveIndex === 0)}
-            aria-disabled={!!loadingLabel}
-            tabIndex={loadingLabel ? -1 : 0}
+            tabIndex={0}
             onMouseEnter={() => handleSessionCreateMenuItemMouseEnter(0)}
             onClick={() => handleSessionCreateMenuItemClick(0)}
           >
@@ -10916,8 +11294,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
             id={sessionCreateMenuItemIds[1]}
             role="menuitem"
             {...menuItemState(sessionCreateMenuActiveIndex === 1)}
-            aria-disabled={!!loadingLabel}
-            tabIndex={loadingLabel ? -1 : 0}
+            tabIndex={0}
             onMouseEnter={() => handleSessionCreateMenuItemMouseEnter(1)}
             onClick={() => handleSessionCreateMenuItemClick(1)}
           >
@@ -10928,6 +11305,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
 
       {sessionMenu && (
         <div
+          ref={sessionMenuRef}
           id="session-action-menu"
           className="session-context-menu"
           style={{ left: sessionMenu.x, top: sessionMenu.y }}
@@ -10940,8 +11318,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
             id={sessionActionMenuItemIds[0]}
             role="menuitem"
             {...menuItemState(sessionMenuActiveIndex === 0)}
-            aria-disabled={!!loadingLabel}
-            tabIndex={loadingLabel ? -1 : 0}
+            tabIndex={0}
             onMouseEnter={() => handleSessionMenuItemMouseEnter(0)}
             onClick={() => handleSessionMenuItemClick(0)}
           >
@@ -10951,8 +11328,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
             id={sessionActionMenuItemIds[1]}
             role="menuitem"
             {...menuItemState(sessionMenuActiveIndex === 1)}
-            aria-disabled={!!loadingLabel}
-            tabIndex={loadingLabel ? -1 : 0}
+            tabIndex={0}
             onMouseEnter={() => handleSessionMenuItemMouseEnter(1)}
             onClick={() => handleSessionMenuItemClick(1)}
           >
@@ -10962,8 +11338,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
             id={sessionActionMenuItemIds[2]}
             role="menuitem"
             {...menuItemState(sessionMenuActiveIndex === 2, 'danger')}
-            aria-disabled={!!loadingLabel}
-            tabIndex={loadingLabel ? -1 : 0}
+            tabIndex={0}
             onMouseEnter={() => handleSessionMenuItemMouseEnter(2)}
             onClick={() => handleSessionMenuItemClick(2)}
           >
@@ -10985,8 +11360,49 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
               <div className="eyebrow">{loadingLabel ?? sessionActivityLabel(activeSession)}</div>
               <h2>{activeSession?.title ?? 'Start a Claude Code session'}</h2>
               <p>{activeSession?.cwd ?? 'Use a quick desktop workspace or choose a project folder for file, git, and terminal tools.'}</p>
-              {activeSession?.lastError && <div className="inline-error">{activeSession.lastError}</div>}
-              {error && <div className="inline-error">{error}</div>}
+              {activeSession?.lastError && !dismissedSessionErrors.has(activeSession.id) && (
+                <div className="inline-error dismissible-error">
+                  <span>{activeSession.lastError}</span>
+                  <button className="error-dismiss" onClick={() => setDismissedSessionErrors(prev => new Set(prev).add(activeSession!.id))} aria-label="Dismiss error">
+                    <Icon name="x" width={14} height={14} />
+                  </button>
+                </div>
+              )}
+              {error && (
+                <div className="inline-error dismissible-error" role="alert">
+                  <span>{error.message}</span>
+                  <div className="error-actions">
+                    {error.retryAction && (
+                      <button
+                        className="error-retry"
+                        onClick={() => { const fn = error.retryAction; setError(undefined); fn?.() }}
+                        aria-label="Retry action"
+                      >
+                        <Icon name="refresh" />Retry
+                      </button>
+                    )}
+                    <button
+                      className="error-details-toggle"
+                      onClick={() => setErrorDetailsOpen(prev => !prev)}
+                      aria-expanded={errorDetailsOpen}
+                      aria-label="Toggle error details"
+                      disabled={!error.stack}
+                    >
+                      <Icon name="chevron-down" />Details
+                    </button>
+                    <button
+                      className="error-dismiss"
+                      onClick={() => setError(undefined)}
+                      aria-label="Dismiss error"
+                    >
+                      <Icon name="x" />
+                    </button>
+                  </div>
+                  {errorDetailsOpen && error.stack && (
+                    <pre className="error-stack">{error.stack}</pre>
+                  )}
+                </div>
+              )}
               {activeSession && workspaceRefreshWarning && (
                 <div className="inline-status error" role="status">
                   {workspaceRefreshWarning}
@@ -11005,16 +11421,16 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
             </div>
             {activeSession && (
               <div className="header-actions">
-                <button className="icon-button" title="Refresh workspace" aria-label="Refresh workspace" data-tooltip="Refresh workspace" onClick={handleRefreshWorkspaceClick} disabled={!activeSession || !!loadingLabel}>
+                <button className="icon-button" title="Refresh workspace" aria-label="Refresh workspace" data-tooltip="Refresh workspace" onClick={handleRefreshWorkspaceClick} disabled={!activeSession || isLoading('workspace') || isLoading('session')}>
                   <Icon name="refresh" />
                 </button>
-                <button className="icon-button" title="Cancel turn" aria-label="Cancel turn" data-tooltip="Cancel turn" onClick={handleCancelTurnClick} disabled={!cancelAvailable || !!loadingLabel}>
+                <button className="icon-button" title="Cancel turn" aria-label="Cancel turn" data-tooltip="Cancel turn" onClick={handleCancelTurnClick} disabled={!cancelAvailable || isLoading('workspace') || isLoading('session')}>
                   <Icon name="square" />
                 </button>
-                <button className="icon-button" title="Clear desktop transcript view" aria-label="Clear desktop transcript view" data-tooltip="Clear desktop transcript view" onClick={handleClearDesktopTranscriptViewClick} disabled={!activeSession || !!loadingLabel}>
+                <button className="icon-button" title="Clear desktop transcript view" aria-label="Clear desktop transcript view" data-tooltip="Clear desktop transcript view" onClick={handleClearDesktopTranscriptViewClick} disabled={!activeSession || isLoading('workspace') || isLoading('session')}>
                   <Icon name="trash" />
                 </button>
-                <button className="icon-button" title="Close session" aria-label="Close session" data-tooltip="Close session" onClick={handleCloseSessionClick} disabled={!activeSession || !!loadingLabel}>
+                <button className="icon-button" title="Close session" aria-label="Close session" data-tooltip="Close session" onClick={handleCloseSessionClick} disabled={!activeSession || isLoading('workspace') || isLoading('session')}>
                   <Icon name="x" />
                 </button>
               </div>
@@ -11034,10 +11450,10 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                 <Icon name="bot" />
                 <p>Start a quick session or choose a project folder for file, git, and terminal tools.</p>
                 <div className="empty-actions">
-                  <button className="send-button" onClick={handleQuickSessionClick} disabled={!!loadingLabel}>
+                  <button className="send-button" onClick={handleQuickSessionClick} disabled={isLoading('session')}>
                     <Icon name="plus" />Quick session
                   </button>
-                  <button className="tool-button" onClick={handleChooseFolderSessionClick} disabled={!!loadingLabel}>
+                  <button className="tool-button" onClick={handleChooseFolderSessionClick} disabled={isLoading('session')}>
                     <Icon name="folder" />Choose folder
                   </button>
                 </div>
@@ -11147,6 +11563,15 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                     codeCopied={copiedTarget === codeCopyTarget}
                     onOpenExternalLink={url => void openExternalLink(url)}
                   />
+                  {message.question && (
+                    <QuestionCard
+                      question={message.question}
+                      messageId={message.id}
+                      answered={answeredQuestions[message.id]}
+                      onSubmit={(answers) => void handleAnswerQuestion(message.id, message.question!.toolUseId, answers, message.question!.questions)}
+                      onCancel={() => void handleAnswerQuestion(message.id, message.question!.toolUseId, {}, message.question!.questions)}
+                    />
+                  )}
                 </article>
               )
             })}
@@ -11175,11 +11600,16 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
             </div>
           )}
 
-          {planApprovalPending && activeSession && !loadingLabel && (
+          {planApprovalPending && activeSession && !isLoading('session') && (
             <div className="plan-approval-bar" role="region" aria-label="Plan approval">
               <div className="plan-approval-content">
                 <Icon name="check-circle" />
-                <span>Plan ready for your review — approve to proceed, or reject to request revisions</span>
+                <div className="plan-approval-text">
+                  <span className="plan-approval-label">Plan ready for your review</span>
+                  {planContent && (
+                    <pre className="plan-approval-plan">{planContent}</pre>
+                  )}
+                </div>
               </div>
               <div className="plan-approval-actions">
                 <button className="tool-button plan-reject" onClick={rejectPlan}>
@@ -11197,7 +11627,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
               <select
                 value={chatTarget.type}
                 aria-label="Send message to"
-                disabled={!activeSession || !!loadingLabel}
+                disabled={!activeSession || isLoading('session')}
                 onChange={handleComposerTargetTypeChange}
               >
                 <option value="session">Current session</option>
@@ -11208,7 +11638,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                 <select
                   value={chatTarget.teamName}
                   aria-label="Target team"
-                  disabled={!activeSession || !!loadingLabel}
+                  disabled={!activeSession || isLoading('session')}
                   onChange={handleComposerTargetTeamChange}
                 >
                   <option value="">Choose team</option>
@@ -11221,7 +11651,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                 <select
                   value={chatTarget.agentType}
                   aria-label="Target agent"
-                  disabled={!activeSession || !!loadingLabel}
+                  disabled={!activeSession || isLoading('session')}
                   onChange={handleComposerTargetAgentChange}
                 >
                   <option value="">Choose agent</option>
@@ -11254,7 +11684,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
               <div className="composer-mentions" aria-label="Detected mentions">
                 {parsedMentions.map((m, i) => (
                   <span key={`${m.kind}-${m.value}-${i}`} className={`mention-chip mention-${m.kind}`}>
-                    <Icon name={m.kind === 'agent' ? 'bot' : m.kind === 'team' ? 'users' : m.kind === 'file' ? 'file' : m.kind === 'skill' ? 'code' : 'terminal'} />
+                    <Icon name={m.kind === 'agent' ? 'bot' : m.kind === 'team' ? 'users' : m.kind === 'file' ? 'file' : m.kind === 'skill' ? 'code' : m.kind === 'builtin' ? (m.value === 'computer-use' ? 'monitor' : 'globe') : 'terminal'} />
                     {m.label}
                   </span>
                 ))}
@@ -11342,7 +11772,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept="image/*,application/pdf,text/*"
               multiple
               style={{ display: 'none' }}
               onChange={handleFileInputChange}
@@ -11367,13 +11797,13 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
               onDrop={handleComposerDrop}
               placeholder={activeSlashCommand ? `Type your message for /${activeSlashCommand.name}...` : "Ask Claude to inspect, edit, test, or explain this workspace"}
               aria-label="Message Claude"
-              disabled={!activeSession || !!loadingLabel}
+              disabled={!activeSession || isLoading('session')}
             />
             <div className="composer-actions">
-              <button type="button" className="tool-button attach-button" onClick={handleAttachButtonClick} disabled={!activeSession || !!loadingLabel} title="Attach image">
+              <button type="button" className="tool-button attach-button" onClick={handleAttachButtonClick} disabled={!activeSession || isLoading('session')} title="Attach image">
                 <Icon name="file" />
               </button>
-              <button className="send-button" onClick={handleComposerSendClick} disabled={!activeSession || turnBusy || (!input.trim() && composerAttachments.length === 0) || !!loadingLabel}>
+              <button className="send-button" onClick={handleComposerSendClick} disabled={!activeSession || turnBusy || (!input.trim() && composerAttachments.length === 0) || isLoading('session')}>
                 <Icon name="send" />
                 Send
               </button>
@@ -11393,8 +11823,8 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
           aria-valuemax={Math.round(MAX_WORKSPACE_RATIO * 100)}
           aria-valuenow={Math.round(workspaceRatio * 100)}
           aria-valuetext={`Workspace ${Math.round(workspaceRatio * 100)} percent`}
-          aria-disabled={!!loadingLabel}
-          tabIndex={activeSession && !loadingLabel ? 0 : -1}
+          aria-disabled={isLoading('workspace')}
+          tabIndex={activeSession && !isLoading('workspace') ? 0 : -1}
         />
 
         <section className="ide-pane">
@@ -11408,7 +11838,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
 
           <section className="pane-body">
             {activePane === 'files' && (
-              <div className="files-pane" aria-busy={!!loadingLabel}>
+              <div className="files-pane" aria-busy={isLoading('workspace')}>
                 <div className="pane-toolbar">
                   <span>
                     Files
@@ -11416,7 +11846,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                   </span>
                   <div className="pane-toolbar-actions">
                     {loadingLabel && <span className="pane-loading-status" role="status">{loadingLabel}</span>}
-                    <button className="tool-button" onClick={handleRefreshFilesClick} disabled={!activeSession || !!loadingLabel}>
+                    <button className="tool-button" onClick={handleRefreshFilesClick} disabled={!activeSession || isLoading('workspace')}>
                       <Icon name="refresh" />Refresh
                     </button>
                   </div>
@@ -11446,7 +11876,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                       aria-current={entry.path === activeFile ? 'true' : undefined}
                       aria-expanded={entry.type === 'directory' ? expandedPaths.has(entry.path) : undefined}
                       onClick={() => handleFileTreeEntryClick(entry)}
-                      disabled={!activeSession || !!loadingLabel}
+                      disabled={!activeSession || isLoading('workspace')}
                     >
                       {entry.type === 'directory' ? <Icon name="folder" /> : <Icon name="code" />}
                       <span>{entry.name}</span>
@@ -11457,7 +11887,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
             )}
 
             {activePane === 'diff' && (
-              <div className="diff-pane" aria-busy={!!loadingLabel}>
+              <div className="diff-pane" aria-busy={isLoading('workspace')}>
                 <div className="pane-toolbar">
                   <span>
                     Git changes
@@ -11465,7 +11895,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                   </span>
                   <div className="pane-toolbar-actions">
                     {loadingLabel && <span className="pane-loading-status" role="status">{loadingLabel}</span>}
-                    <button className="tool-button" onClick={handleRefreshDiffClick} disabled={!activeSession || !!loadingLabel}>
+                    <button className="tool-button" onClick={handleRefreshDiffClick} disabled={!activeSession || isLoading('workspace')}>
                       <Icon name="refresh" />Refresh
                     </button>
                   </div>
@@ -11499,7 +11929,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                         key={file.path}
                         className={file.path === selectedDiff?.path ? 'active' : ''}
                         onClick={() => handleDiffFileClick(file.path)}
-                        disabled={!activeSession || !!loadingLabel}
+                        disabled={!activeSession || isLoading('workspace')}
                       >
                         <span>{file.path}</span>
                         <small>+{file.additions} -{file.deletions}</small>
@@ -11535,7 +11965,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                     {activeFile ?? 'Open a file from the Files pane'}
                     {hasUnsavedChanges ? ' · Unsaved' : ''}
                   </span>
-                  <button className="icon-button" title="Save file" aria-label="Save file" data-tooltip="Save file" onClick={handleSaveFileClick} disabled={!activeSession || !activeFile || !!loadingLabel}>
+                  <button className="icon-button" title="Save file" aria-label="Save file" data-tooltip="Save file" onClick={handleSaveFileClick} disabled={!activeSession || !activeFile || isLoading('workspace')}>
                     <Icon name="save" />
                   </button>
                 </div>
@@ -11564,10 +11994,10 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
             {activePane === 'terminal' && (
               <div className="terminal-pane">
                 <div className="terminal-toolbar">
-                  <button className="tool-button" onClick={handleStartTerminalClick} disabled={!activeSession || !!terminalId || !!loadingLabel}>
+                  <button className="tool-button" onClick={handleStartTerminalClick} disabled={!activeSession || !!terminalId || isLoading('shell')}>
                     <Icon name="play" />Start shell
                   </button>
-                  <button className="tool-button" onClick={handleStopTerminalClick} disabled={!activeSession || !terminalId || !!loadingLabel}>
+                  <button className="tool-button" onClick={handleStopTerminalClick} disabled={!activeSession || !terminalId || isLoading('shell')}>
                     <Icon name="square" />Stop
                   </button>
                   {terminalInfo && (
@@ -11607,12 +12037,12 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                     onChange={handlePreviewUrlChange}
                     placeholder="https://localhost:3000"
                     aria-label="Preview URL"
-                    disabled={!activeSession || !!loadingLabel}
+                    disabled={!activeSession || isLoading('preview')}
                   />
-                  <button className="tool-button" onClick={handleOpenPreviewClick} disabled={!activeSession || !previewUrlValid || !!loadingLabel}>
+                  <button className="tool-button" onClick={handleOpenPreviewClick} disabled={!activeSession || !previewUrlValid || isLoading('preview')}>
                     <Icon name="play" />Open
                   </button>
-                  <button className="tool-button icon-only" onClick={handleOpenExternalPreviewClick} disabled={!activeSession || !previewUrlValid || !!loadingLabel} title="Open in browser" aria-label="Open in browser" data-tooltip="Open in browser"><Icon name="open" /></button>
+                  <button className="tool-button icon-only" onClick={handleOpenExternalPreviewClick} disabled={!activeSession || !previewUrlValid || isLoading('preview')} title="Open in browser" aria-label="Open in browser" data-tooltip="Open in browser"><Icon name="open" /></button>
                 </div>
                 {previewStatus && (
                   <div className={`preview-status ${previewStatus.kind}`} role="status">
@@ -11642,7 +12072,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                 className={activePane === 'teams' ? 'teams-pane' : 'agents-pane agents-management-pane'}
                 role="region"
                 aria-label={activePane === 'teams' ? 'Team management' : 'Agent management'}
-                aria-busy={!!loadingLabel}
+                aria-busy={isLoading('agents') || isLoading('session')}
                 ref={element => {
                   if (element) flushPendingPaneSection(activePane === 'teams' ? 'teams' : 'agents')
                 }}
@@ -11660,7 +12090,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                   </span>
                   <div className="pane-toolbar-actions">
                     {loadingLabel && <span className="pane-loading-status" role="status">{loadingLabel}</span>}
-                    <button className="tool-button" onClick={handleAgentsRefreshClick} disabled={(activePane === 'teams' && !activeSession) || !!loadingLabel}>
+                    <button className="tool-button" onClick={handleAgentsRefreshClick} disabled={(activePane === 'teams' && !activeSession) || isLoading('agents') || isLoading('session')}>
                       <Icon name="refresh" />Refresh
                     </button>
                   </div>
@@ -11721,7 +12151,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                             onChange={handleAgentCatalogQueryChange}
                             placeholder="search agents"
                             aria-label="Search agents"
-                            disabled={!!loadingLabel}
+                            disabled={isLoading('agents') || isLoading('session')}
                             role="combobox"
                             aria-expanded="true"
                             aria-controls="agent-catalog-listbox"
@@ -11731,7 +12161,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                           <select
                             value={agentCatalogSource}
                             aria-label="Agent catalog filter"
-                            disabled={!!loadingLabel}
+                            disabled={isLoading('agents') || isLoading('session')}
                             onChange={handleAgentCatalogSourceChange}
                           >
                             {agentSourceFilters.map(filter => (
@@ -11758,9 +12188,9 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                               id={agentCatalogOptionId(agent)}
                               role="option"
                               aria-selected={isAgentCatalogItemActive(agent)}
-                              aria-disabled={!!loadingLabel}
+                              aria-disabled={isLoading('agents') || isLoading('session')}
                               {...agentCatalogCardState(agent)}
-                              tabIndex={loadingLabel ? -1 : 0}
+                              tabIndex={isLoading('workspace') ? -1 : 0}
                               onClick={() => handleAgentCatalogRowClick(agent)}
                               onKeyDown={event => handleAgentCatalogRowKeyDown(event, agent)}
                             >
@@ -11771,10 +12201,10 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                               {agent.requiredMcpServers?.length ? <code>MCP: {agent.requiredMcpServers.join(', ')}</code> : null}
                               {agent.skills?.length ? <code>Skills: {agent.skills.join(', ')}</code> : null}
                               <div className="section-actions" onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
-                                <button className="tool-button" onClick={() => handleAgentCatalogSelectClick(agent)} disabled={!!loadingLabel}>
+                                <button className="tool-button" onClick={() => handleAgentCatalogSelectClick(agent)} disabled={isLoading('agents') || isLoading('session')}>
                                   <Icon name="panel" />Select
                                 </button>
-                                <button className="tool-button" onClick={() => handleAgentCatalogDiagnoseClick(agent)} disabled={!activeSession || !!loadingLabel}>
+                                <button className="tool-button" onClick={() => handleAgentCatalogDiagnoseClick(agent)} disabled={!activeSession || isLoading('agents') || isLoading('session')}>
                                   <Icon name="refresh" />Diagnose
                                 </button>
                               </div>
@@ -11842,19 +12272,19 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                           </div>
                         )}
                         <div className="section-actions selected-agent-actions">
-                          <button className="tool-button" onClick={handleSelectedAgentDiagnoseClick} disabled={!activeSession || !!loadingLabel}>
+                          <button className="tool-button" onClick={handleSelectedAgentDiagnoseClick} disabled={!activeSession || isLoading('agents') || isLoading('session')}>
                             <Icon name="refresh" />Diagnose
                           </button>
-                          <button className="tool-button" onClick={handleSelectedAgentNewSessionClick} disabled={!activeSession || !!loadingLabel}>
+                          <button className="tool-button" onClick={handleSelectedAgentNewSessionClick} disabled={!activeSession || isLoading('agents') || isLoading('session')}>
                             <Icon name="plus" />New session
                           </button>
-                          <button className="tool-button" onClick={handleSelectedAgentPrepareRunClick} disabled={!activeSession || !!loadingLabel}>
+                          <button className="tool-button" onClick={handleSelectedAgentPrepareRunClick} disabled={!activeSession || isLoading('agents') || isLoading('session')}>
                             <Icon name="play" />Prepare task
                           </button>
-                          <button className="tool-button" onClick={handleSelectedAgentPrepareEditClick} disabled={!canEditSelectedAgent || !!loadingLabel}>
+                          <button className="tool-button" onClick={handleSelectedAgentPrepareEditClick} disabled={!canEditSelectedAgent || isLoading('agents') || isLoading('session')}>
                             <Icon name="pencil" />{selectedAgent.editable ? 'Edit' : 'Override'}
                           </button>
-                          <button className="tool-button danger" onClick={handleSelectedAgentDeleteClick} disabled={!canDeleteSelectedAgent || !!loadingLabel}>
+                          <button className="tool-button danger" onClick={handleSelectedAgentDeleteClick} disabled={!canDeleteSelectedAgent || isLoading('agents') || isLoading('session')}>
                             <Icon name="trash" />Delete
                           </button>
                         </div>
@@ -11875,21 +12305,21 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                             onChange={handleAgentLaunchAgentTypeChange}
                             placeholder="agent type"
                             aria-label="Launch agent type"
-                            disabled={agentLaunchDraftSessionBlocked || !!loadingLabel}
+                            disabled={agentLaunchDraftSessionBlocked || isLoading('agents') || isLoading('session')}
                           />
                           <input
                             value={agentLaunchDraft.model}
                             onChange={handleAgentLaunchModelChange}
                             placeholder="model override"
                             aria-label="Launch model override"
-                            disabled={agentLaunchDraftSessionBlocked || !!loadingLabel}
+                            disabled={agentLaunchDraftSessionBlocked || isLoading('agents') || isLoading('session')}
                           />
                           <input
                             value={agentLaunchDraft.permissionMode}
                             onChange={handleAgentLaunchPermissionModeChange}
                             placeholder="permission mode"
                             aria-label="Launch permission mode"
-                            disabled={agentLaunchDraftSessionBlocked || !!loadingLabel}
+                            disabled={agentLaunchDraftSessionBlocked || isLoading('agents') || isLoading('session')}
                           />
                         </div>
                         <div className="form-row">
@@ -11898,12 +12328,12 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                             onChange={handleAgentLaunchDescriptionChange}
                             placeholder="short task description"
                             aria-label="Launch task description"
-                            disabled={agentLaunchDraftSessionBlocked || !!loadingLabel}
+                            disabled={agentLaunchDraftSessionBlocked || isLoading('agents') || isLoading('session')}
                           />
                           <select
                             value={agentLaunchDraft.isolation}
                             aria-label="Launch isolation"
-                            disabled={agentLaunchDraftSessionBlocked || !!loadingLabel}
+                            disabled={agentLaunchDraftSessionBlocked || isLoading('agents') || isLoading('session')}
                             onChange={handleAgentLaunchIsolationChange}
                           >
                             <option value="">no isolation</option>
@@ -11916,7 +12346,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                           onChange={handleAgentLaunchPromptChange}
                           placeholder="task prompt for the selected agent"
                           aria-label="Launch task prompt"
-                          disabled={agentLaunchDraftSessionBlocked || !!loadingLabel}
+                          disabled={agentLaunchDraftSessionBlocked || isLoading('agents') || isLoading('session')}
                         />
                         {agentLaunchTaskInvalid && (
                           <div className="form-note">
@@ -11929,21 +12359,21 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                             onChange={handleAgentLaunchNameChange}
                             placeholder="teammate name"
                             aria-label="Launch teammate name"
-                            disabled={agentLaunchDraftSessionBlocked || !!loadingLabel}
+                            disabled={agentLaunchDraftSessionBlocked || isLoading('agents') || isLoading('session')}
                           />
                           <input
                             value={agentLaunchDraft.teamName}
                             onChange={handleAgentLaunchTeamNameChange}
                             placeholder="team name"
                             aria-label="Launch team name"
-                            disabled={agentLaunchDraftSessionBlocked || !!loadingLabel}
+                            disabled={agentLaunchDraftSessionBlocked || isLoading('agents') || isLoading('session')}
                           />
                           <input
                             value={agentLaunchDraft.mode}
                             onChange={handleAgentLaunchModeChange}
                             placeholder="teammate mode"
                             aria-label="Launch teammate mode"
-                            disabled={agentLaunchDraftSessionBlocked || !!loadingLabel}
+                            disabled={agentLaunchDraftSessionBlocked || isLoading('agents') || isLoading('session')}
                           />
                         </div>
                         <div className="section-actions">
@@ -11952,15 +12382,15 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                               type="checkbox"
                               checked={agentLaunchDraft.runInBackground}
                               aria-label="Run launch task in background"
-                              disabled={agentLaunchDraftSessionBlocked || !!loadingLabel}
+                              disabled={agentLaunchDraftSessionBlocked || isLoading('agents') || isLoading('session')}
                               onChange={handleAgentLaunchRunInBackgroundChange}
                             />
                             Background
                           </label>
-                          <button className="tool-button" onClick={handleAgentLaunchCreateSessionClick} disabled={!activeSession || !agentLaunchDraft.agentType.trim() || !!loadingLabel}>
+                          <button className="tool-button" onClick={handleAgentLaunchCreateSessionClick} disabled={!activeSession || !agentLaunchDraft.agentType.trim() || isLoading('agents') || isLoading('session')}>
                             <Icon name="plus" />New agent session
                           </button>
-                          <button className="send-button" onClick={handleAgentLaunchTaskClick} disabled={!canLaunchAgentTask || !!loadingLabel}>
+                          <button className="send-button" onClick={handleAgentLaunchTaskClick} disabled={!canLaunchAgentTask || isLoading('agents') || isLoading('session')}>
                             <Icon name="send" />Launch task
                           </button>
                         </div>
@@ -11983,7 +12413,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                         {agentDiagnostics.missingMcpServers.length ? (
                           <div className="mini-list">
                             <code>Missing MCP: {agentDiagnostics.missingMcpServers.join(', ')}</code>
-                            <button className="tool-button" onClick={handleAgentDiagnosticsMcpSettingsClick} disabled={!!loadingLabel}>
+                            <button className="tool-button" onClick={handleAgentDiagnosticsMcpSettingsClick} disabled={isLoading('agents') || isLoading('session')}>
                               <Icon name="settings" />Open MCP settings
                             </button>
                           </div>
@@ -11991,7 +12421,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                         {agentDiagnostics.missingSkills.length ? (
                           <div className="mini-list">
                             <code>Missing skills: {agentDiagnostics.missingSkills.join(', ')}</code>
-                            <button className="tool-button" onClick={handleAgentDiagnosticsSkillsSettingsClick} disabled={!!loadingLabel}>
+                            <button className="tool-button" onClick={handleAgentDiagnosticsSkillsSettingsClick} disabled={isLoading('agents') || isLoading('session')}>
                               <Icon name="settings" />Open Skills settings
                             </button>
                           </div>
@@ -12021,12 +12451,12 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                             onChange={handleAgentEditorTypeChange}
                             placeholder="agent type"
                             aria-label="Agent editor type"
-                            disabled={!!loadingLabel}
+                            disabled={isLoading('agents') || isLoading('session')}
                           />
                           <select
                             value={agentDraft.source}
                             aria-label="Agent editor source"
-                            disabled={!!loadingLabel}
+                            disabled={isLoading('agents') || isLoading('session')}
                             onChange={handleAgentEditorSourceChange}
                           >
                             <option value="project">project</option>
@@ -12038,7 +12468,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                           onChange={handleAgentEditorWhenToUseChange}
                           placeholder="when to use this agent"
                           aria-label="When to use this agent"
-                          disabled={!!loadingLabel}
+                          disabled={isLoading('agents') || isLoading('session')}
                         />
                         <div className="form-row">
                           <input
@@ -12046,14 +12476,14 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                             onChange={handleAgentEditorModelChange}
                             placeholder="model"
                             aria-label="Agent editor model"
-                            disabled={!!loadingLabel}
+                            disabled={isLoading('agents') || isLoading('session')}
                           />
                           <input
                             value={agentDraft.permissionMode}
                             onChange={handleAgentEditorPermissionModeChange}
                             placeholder="permission mode"
                             aria-label="Agent editor permission mode"
-                            disabled={!!loadingLabel}
+                            disabled={isLoading('agents') || isLoading('session')}
                           />
                         </div>
                         <div className="form-row">
@@ -12062,14 +12492,14 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                             onChange={handleAgentEditorToolsChange}
                             placeholder="tools, comma-separated"
                             aria-label="Agent editor allowed tools"
-                            disabled={!!loadingLabel}
+                            disabled={isLoading('agents') || isLoading('session')}
                           />
                           <input
                             value={agentDraft.disallowedTools}
                             onChange={handleAgentEditorDisallowedToolsChange}
                             placeholder="disallowed tools, comma-separated"
                             aria-label="Agent editor disallowed tools"
-                            disabled={!!loadingLabel}
+                            disabled={isLoading('agents') || isLoading('session')}
                           />
                         </div>
                         <div className="form-row">
@@ -12078,14 +12508,14 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                             onChange={handleAgentEditorSkillsChange}
                             placeholder="skills, comma-separated"
                             aria-label="Agent editor skills"
-                            disabled={!!loadingLabel}
+                            disabled={isLoading('agents') || isLoading('session')}
                           />
                           <input
                             value={agentDraft.memory}
                             onChange={handleAgentEditorMemoryChange}
                             placeholder="memory scope"
                             aria-label="Agent editor memory scope"
-                            disabled={!!loadingLabel}
+                            disabled={isLoading('agents') || isLoading('session')}
                           />
                         </div>
                         <div className="form-row">
@@ -12094,12 +12524,12 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                             onChange={handleAgentEditorRequiredMcpServersChange}
                             placeholder="required MCP servers, comma-separated"
                             aria-label="Agent editor required MCP servers"
-                            disabled={!!loadingLabel}
+                            disabled={isLoading('agents') || isLoading('session')}
                           />
                           <select
                             value={agentDraft.isolation}
                             aria-label="Agent editor isolation"
-                            disabled={!!loadingLabel}
+                            disabled={isLoading('agents') || isLoading('session')}
                             onChange={handleAgentEditorIsolationChange}
                           >
                             <option value="">no isolation</option>
@@ -12112,7 +12542,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                           onChange={handleAgentEditorPromptChange}
                           placeholder="agent system prompt"
                           aria-label="Agent system prompt"
-                          disabled={!!loadingLabel}
+                          disabled={isLoading('agents') || isLoading('session')}
                         />
                         <div className="section-actions">
                           <label className="toggle-row compact">
@@ -12120,18 +12550,18 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                               type="checkbox"
                               checked={agentDraft.background}
                               aria-label="Agent runs in background"
-                              disabled={!!loadingLabel}
+                              disabled={isLoading('agents') || isLoading('session')}
                               onChange={handleAgentEditorBackgroundChange}
                             />
                             Background
                           </label>
-                          <button className="tool-button" onClick={handleAgentEditorSaveClick} disabled={(agentDraft.source === 'project' && !activeSession) || !agentDraft.agentType.trim() || !agentDraft.whenToUse.trim() || !agentDraft.prompt.trim() || !!loadingLabel}>
+                          <button className="tool-button" onClick={handleAgentEditorSaveClick} disabled={(agentDraft.source === 'project' && !activeSession) || !agentDraft.agentType.trim() || !agentDraft.whenToUse.trim() || !agentDraft.prompt.trim() || isLoading('agents') || isLoading('session')}>
                             <Icon name="save" />Save agent
                           </button>
-                          <button className="tool-button" onClick={handleAgentEditorNewClick} disabled={!!loadingLabel}>
+                          <button className="tool-button" onClick={handleAgentEditorNewClick} disabled={isLoading('agents') || isLoading('session')}>
                             <Icon name="plus" />New
                           </button>
-                          <button className="tool-button danger" onClick={handleAgentEditorDeleteClick} disabled={!canDeleteAgentDraft || !!loadingLabel}>
+                          <button className="tool-button danger" onClick={handleAgentEditorDeleteClick} disabled={!canDeleteAgentDraft || isLoading('agents') || isLoading('session')}>
                             <Icon name="trash" />Delete
                           </button>
                         </div>
@@ -12146,7 +12576,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                           onChange={handleAgentTaskPromptChange}
                           placeholder="follow-up prompt for Resume"
                           aria-label="Agent task resume prompt"
-                          disabled={agentTaskPromptSessionBlocked || !!loadingLabel}
+                          disabled={agentTaskPromptSessionBlocked || isLoading('agents') || isLoading('session')}
                         />
                       </div>
                       <div id="agent-task-listbox" className="config-list" role="listbox" aria-label="Agent tasks">
@@ -12174,16 +12604,16 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                             ) : null}
                             {task.outputPreview && <pre>{task.outputPreview}</pre>}
                             <div className="section-actions">
-                              <button className="tool-button" onClick={() => handleAgentTaskReadOutputClick(task.id)} disabled={!canQueueRuntimePrompt || !!loadingLabel}>
+                              <button className="tool-button" onClick={() => handleAgentTaskReadOutputClick(task.id)} disabled={!canQueueRuntimePrompt || isLoading('agents') || isLoading('session')}>
                                 <Icon name="clipboard" />Read output
                               </button>
-                              <button className="tool-button" onClick={() => handleAgentTaskPreviewOutputClick(task.id)} disabled={!activeSession || !task.outputFile || !!loadingLabel}>
+                              <button className="tool-button" onClick={() => handleAgentTaskPreviewOutputClick(task.id)} disabled={!activeSession || !task.outputFile || isLoading('agents') || isLoading('session')}>
                                 <Icon name="open" />Preview file
                               </button>
-                              <button className="tool-button" onClick={() => handleAgentTaskResumeClick(task.id)} disabled={!canQueueRuntimePrompt || !agentTaskPrompt.trim() || !!loadingLabel}>
+                              <button className="tool-button" onClick={() => handleAgentTaskResumeClick(task.id)} disabled={!canQueueRuntimePrompt || !agentTaskPrompt.trim() || isLoading('agents') || isLoading('session')}>
                                 <Icon name="play" />Resume
                               </button>
-                              <button className="tool-button danger" onClick={() => handleAgentTaskStopClick(task.id)} disabled={!canQueueRuntimePrompt || task.status !== 'running' || !!loadingLabel}>
+                              <button className="tool-button danger" onClick={() => handleAgentTaskStopClick(task.id)} disabled={!canQueueRuntimePrompt || task.status !== 'running' || isLoading('agents') || isLoading('session')}>
                                 <Icon name="square" />Stop
                               </button>
                             </div>
@@ -12216,28 +12646,28 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                           <button 
                             className={rpcMessageFilter === 'all' ? 'active' : ''} 
                             onClick={() => setRpcMessageFilter('all')}
-                            disabled={!!loadingLabel}
+                            disabled={isLoading('agents') || isLoading('session')}
                           >
                             All ({rpcMessages.length})
                           </button>
                           <button 
                             className={rpcMessageFilter === 'tool' ? 'active' : ''} 
                             onClick={() => setRpcMessageFilter('tool')}
-                            disabled={!!loadingLabel}
+                            disabled={isLoading('agents') || isLoading('session')}
                           >
                             Tools
                           </button>
                           <button 
                             className={rpcMessageFilter === 'message' ? 'active' : ''} 
                             onClick={() => setRpcMessageFilter('message')}
-                            disabled={!!loadingLabel}
+                            disabled={isLoading('agents') || isLoading('session')}
                           >
                             Messages
                           </button>
                           <button 
                             className={rpcMessageFilter === 'system' ? 'active' : ''} 
                             onClick={() => setRpcMessageFilter('system')}
-                            disabled={!!loadingLabel}
+                            disabled={isLoading('agents') || isLoading('session')}
                           >
                             System
                           </button>
@@ -12269,7 +12699,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                         <button 
                           className="tool-button" 
                           onClick={() => { setRpcMessages([]); setSelectedRpcMessage(undefined) }}
-                          disabled={!!loadingLabel || rpcMessages.length === 0}
+                          disabled={isLoading('agents') || rpcMessages.length === 0}
                         >
                           <Icon name="trash" />Clear
                         </button>
@@ -12388,14 +12818,14 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                         onChange={handleTeamDraftTeamNameChange}
                         placeholder="team name"
                         aria-label="Team name"
-                        disabled={teamDraftSessionBlocked || !!loadingLabel}
+                        disabled={teamDraftSessionBlocked || isLoading('agents') || isLoading('session')}
                       />
                       <input
                         value={teamDraft.agentType}
                         onChange={handleTeamDraftAgentTypeChange}
                         placeholder="lead agent type"
                         aria-label="Team lead agent type"
-                        disabled={teamDraftSessionBlocked || !!loadingLabel}
+                        disabled={teamDraftSessionBlocked || isLoading('agents') || isLoading('session')}
                       />
                     </div>
                     <input
@@ -12403,7 +12833,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                       onChange={handleTeamDraftDescriptionChange}
                       placeholder="team purpose"
                       aria-label="Team purpose"
-                      disabled={teamDraftSessionBlocked || !!loadingLabel}
+                      disabled={teamDraftSessionBlocked || isLoading('agents') || isLoading('session')}
                     />
                     <div className="form-row">
                       <input
@@ -12411,21 +12841,21 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                         onChange={handleTeamDraftTeammateAgentTypeChange}
                         placeholder="teammate agent type"
                         aria-label="Team teammate agent type"
-                        disabled={teamDraftSessionBlocked || !!loadingLabel}
+                        disabled={teamDraftSessionBlocked || isLoading('agents') || isLoading('session')}
                       />
                       <input
                         value={teamDraft.teammateName}
                         onChange={handleTeamDraftTeammateNameChange}
                         placeholder="new teammate name"
                         aria-label="Team teammate name"
-                        disabled={teamDraftSessionBlocked || !!loadingLabel}
+                        disabled={teamDraftSessionBlocked || isLoading('agents') || isLoading('session')}
                       />
                       <input
                         value={teamDraft.teammateMode}
                         onChange={handleTeamDraftTeammateModeChange}
                         placeholder="teammate mode"
                         aria-label="Team teammate mode"
-                        disabled={teamDraftSessionBlocked || !!loadingLabel}
+                        disabled={teamDraftSessionBlocked || isLoading('agents') || isLoading('session')}
                       />
                     </div>
                     <textarea
@@ -12433,7 +12863,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                       onChange={handleTeamDraftTeammatePromptChange}
                       placeholder="task prompt for new teammate"
                       aria-label="Team teammate prompt"
-                      disabled={teamDraftSessionBlocked || !!loadingLabel}
+                      disabled={teamDraftSessionBlocked || isLoading('agents') || isLoading('session')}
                     />
                     <div className="form-row">
                       <input
@@ -12441,14 +12871,14 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                         onChange={handleTeamDraftMessageRecipientChange}
                         placeholder="teammate name or *"
                         aria-label="Team message recipient"
-                        disabled={teamDraftSessionBlocked || !!loadingLabel}
+                        disabled={teamDraftSessionBlocked || isLoading('agents') || isLoading('session')}
                       />
                       <input
                         value={teamDraft.shutdownReason}
                         onChange={handleTeamDraftShutdownReasonChange}
                         placeholder="shutdown reason"
                         aria-label="Team shutdown reason"
-                        disabled={teamDraftSessionBlocked || !!loadingLabel}
+                        disabled={teamDraftSessionBlocked || isLoading('agents') || isLoading('session')}
                       />
                     </div>
                     <textarea
@@ -12457,22 +12887,22 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                       onChange={handleTeamDraftMessageChange}
                       placeholder="message for selected teammate"
                       aria-label="Team message"
-                      disabled={teamDraftSessionBlocked || !!loadingLabel}
+                      disabled={teamDraftSessionBlocked || isLoading('agents') || isLoading('session')}
                     />
                     <div className="section-actions">
-                      <button className="tool-button" onClick={handleTeamFormCreateClick} disabled={!activeSession || !teamDraft.teamName.trim() || !!loadingLabel}>
+                      <button className="tool-button" onClick={handleTeamFormCreateClick} disabled={!activeSession || !teamDraft.teamName.trim() || isLoading('agents') || isLoading('session')}>
                         <Icon name="plus" />Create team
                       </button>
-                      <button className="tool-button" onClick={handleTeamFormSpawnTeammateClick} disabled={!canQueueRuntimePrompt || !teamDraft.teamName.trim() || !teamDraft.teammateName.trim() || !teamDraft.teammatePrompt.trim() || !!loadingLabel}>
+                      <button className="tool-button" onClick={handleTeamFormSpawnTeammateClick} disabled={!canQueueRuntimePrompt || !teamDraft.teamName.trim() || !teamDraft.teammateName.trim() || !teamDraft.teammatePrompt.trim() || isLoading('agents') || isLoading('session')}>
                         <Icon name="bot" />Spawn teammate
                       </button>
-                      <button className="tool-button" onClick={handleTeamFormSendClick} disabled={!canQueueRuntimePrompt || !teamDraft.teamName.trim() || !teamDraft.to.trim() || !teamDraft.message.trim() || !!loadingLabel}>
+                      <button className="tool-button" onClick={handleTeamFormSendClick} disabled={!canQueueRuntimePrompt || !teamDraft.teamName.trim() || !teamDraft.to.trim() || !teamDraft.message.trim() || isLoading('agents') || isLoading('session')}>
                         <Icon name="send" />Send
                       </button>
-                      <button className="tool-button" onClick={handleTeamFormShutdownClick} disabled={!canQueueRuntimePrompt || !teamDraft.teamName.trim() || !teamDraft.to.trim() || !!loadingLabel}>
+                      <button className="tool-button" onClick={handleTeamFormShutdownClick} disabled={!canQueueRuntimePrompt || !teamDraft.teamName.trim() || !teamDraft.to.trim() || isLoading('agents') || isLoading('session')}>
                         <Icon name="square" />Shutdown
                       </button>
-                      <button className="tool-button danger" onClick={handleTeamFormDeleteClick} disabled={!activeSession || !teamDraft.teamName.trim() || !!loadingLabel}>
+                      <button className="tool-button danger" onClick={handleTeamFormDeleteClick} disabled={!activeSession || !teamDraft.teamName.trim() || isLoading('agents') || isLoading('session')}>
                         <Icon name="trash" />Delete team
                       </button>
                     </div>
@@ -12486,9 +12916,9 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                           id={teamOptionId(team)}
                           role="option"
                           aria-selected={isTeamItemActive(team)}
-                          aria-disabled={!activeSession || !!loadingLabel}
+                          aria-disabled={!activeSession || isLoading('agents') || isLoading('session')}
                           {...teamCardState(team)}
-                          tabIndex={!activeSession || loadingLabel ? -1 : 0}
+                          tabIndex={!activeSession || isLoading('agents') || isLoading('session') ? -1 : 0}
                           onClick={() => handleTeamRowSelectClick(team)}
                           onKeyDown={event => handleTeamRowKeyDown(event, team)}
                         >
@@ -12510,7 +12940,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                               <button
                                 className="team-member-select"
                                 type="button"
-                                disabled={!activeSession || !!loadingLabel}
+                                disabled={!activeSession || isLoading('agents') || isLoading('session')}
                                 onClick={() => handleTeamMemberSelectClick(team, member)}
                               >
                                 <span>@{member.name}</span>
@@ -12525,7 +12955,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                                 aria-label={`Message ${member.name}`}
                                 data-tooltip={`Message ${member.name}`}
                                 onClick={() => handleTeamMemberMessageClick(team, member)}
-                                disabled={!activeSession || !!loadingLabel}
+                                disabled={!activeSession || isLoading('agents') || isLoading('session')}
                               >
                                 <Icon name="send" />
                               </button>
@@ -12536,7 +12966,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                                 aria-label={`Shutdown ${member.name}`}
                                 data-tooltip={`Shutdown ${member.name}`}
                                 onClick={() => handleTeamMemberShutdownClick(team, member)}
-                                disabled={!canQueueRuntimePrompt || !!loadingLabel}
+                                disabled={!canQueueRuntimePrompt || isLoading('agents') || isLoading('session')}
                               >
                                 <Icon name="square" />
                               </button>
@@ -12547,7 +12977,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                                 aria-label={`Remove ${member.name} from ${team.name}`}
                                 data-tooltip={`Remove ${member.name}`}
                                 onClick={() => handleTeamMemberRemoveClick(team, member)}
-                                disabled={!activeSession || !!loadingLabel}
+                                disabled={!activeSession || isLoading('agents') || isLoading('session')}
                               >
                                 <Icon name="trash" />
                               </button>
@@ -12561,13 +12991,13 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                           )}
                         </div>
                         <div className="section-actions" onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
-                          <button className="tool-button" onClick={() => handleTeamRowSelectClick(team)} disabled={!activeSession || !!loadingLabel}>
+                          <button className="tool-button" onClick={() => handleTeamRowSelectClick(team)} disabled={!activeSession || isLoading('agents') || isLoading('session')}>
                             <Icon name="panel" />Select
                           </button>
-                          <button className="tool-button" onClick={() => handleTeamRowMessageAllClick(team)} disabled={!activeSession || !!loadingLabel}>
+                          <button className="tool-button" onClick={() => handleTeamRowMessageAllClick(team)} disabled={!activeSession || isLoading('agents') || isLoading('session')}>
                             <Icon name="send" />Message all
                           </button>
-                          <button className="tool-button danger" onClick={() => handleTeamRowDeleteClick(team)} disabled={!activeSession || !!loadingLabel}>
+                          <button className="tool-button danger" onClick={() => handleTeamRowDeleteClick(team)} disabled={!activeSession || isLoading('agents') || isLoading('session')}>
                             <Icon name="trash" />Delete team
                           </button>
                         </div>
@@ -12602,7 +13032,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                   </span>
                   <div className="pane-toolbar-actions">
                     {loadingLabel && <span className="pane-loading-status" role="status">{loadingLabel}</span>}
-                    <button className="tool-button" onClick={handleSettingsRefreshClick} disabled={!!loadingLabel}>
+                    <button className="tool-button" onClick={handleSettingsRefreshClick} disabled={isLoading('config')}>
                       <Icon name="refresh" />Refresh
                     </button>
                   </div>
@@ -12637,7 +13067,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                   </span>
                   <div className="pane-toolbar-actions">
                     {loadingLabel && <span className="pane-loading-status" role="status">{loadingLabel}</span>}
-                    <button className="tool-button" onClick={handleSettingsRefreshClick} disabled={!!loadingLabel}>
+                    <button className="tool-button" onClick={handleSettingsRefreshClick} disabled={isLoading('config')}>
                       <Icon name="refresh" />Refresh
                     </button>
                   </div>
@@ -12665,12 +13095,12 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                         onChange={handleMcpDraftNameChange}
                         placeholder="server name"
                         aria-label="MCP server name"
-                        disabled={mcpDraftSessionBlocked || !!loadingLabel}
+                        disabled={mcpDraftSessionBlocked || isLoading('mcp')}
                       />
                       <select
                         value={mcpDraft.scope}
                         aria-label="MCP server scope"
-                        disabled={!!loadingLabel}
+                        disabled={isLoading('mcp')}
                         onChange={handleMcpDraftScopeChange}
                       >
                         <option value="user">user scope</option>
@@ -12681,7 +13111,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                       <select
                         value={mcpDraft.mode}
                         aria-label="MCP server mode"
-                        disabled={mcpDraftSessionBlocked || !!loadingLabel}
+                        disabled={mcpDraftSessionBlocked || isLoading('mcp')}
                         onChange={handleMcpDraftModeChange}
                       >
                         <option value="stdio">stdio</option>
@@ -12695,14 +13125,14 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                           onChange={handleMcpDraftCommandChange}
                           placeholder="command"
                           aria-label="MCP command"
-                          disabled={mcpDraftSessionBlocked || !!loadingLabel}
+                          disabled={mcpDraftSessionBlocked || isLoading('mcp')}
                         />
                         <input
                           value={mcpDraft.args}
                           onChange={handleMcpDraftArgsChange}
                           placeholder="args"
                           aria-label="MCP command arguments"
-                          disabled={mcpDraftSessionBlocked || !!loadingLabel}
+                          disabled={mcpDraftSessionBlocked || isLoading('mcp')}
                         />
                       </div>
                     ) : (
@@ -12710,7 +13140,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                         <select
                           value={mcpDraft.type}
                           aria-label="MCP remote type"
-                          disabled={mcpDraftSessionBlocked || !!loadingLabel}
+                          disabled={mcpDraftSessionBlocked || isLoading('mcp')}
                           onChange={handleMcpDraftRemoteTypeChange}
                         >
                           <option value="streamable-http">streamable-http</option>
@@ -12721,7 +13151,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                           onChange={handleMcpDraftRemoteUrlChange}
                           placeholder={mcpDraft.editingName ? 'leave blank to keep current URL' : 'https://mcp.example/server'}
                           aria-label="MCP remote URL"
-                          disabled={mcpDraftSessionBlocked || !!loadingLabel}
+                          disabled={mcpDraftSessionBlocked || isLoading('mcp')}
                         />
                       </div>
                     )}
@@ -12729,15 +13159,15 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                       <div className="form-note">Project-scoped servers require selecting a workspace session.</div>
                     )}
                     <div className="section-actions">
-                      <button className="tool-button" onClick={handleMcpSaveClick} disabled={!canSaveMcpDraft || !!loadingLabel}>
+                      <button className="tool-button" onClick={handleMcpSaveClick} disabled={!canSaveMcpDraft || isLoading('mcp')}>
                         <Icon name={mcpDraft.editingName ? 'save' : 'plus'} />{mcpDraft.editingName ? 'Save changes' : 'Add server'}
                       </button>
                       {mcpDraft.editingName && (
-                        <button className="tool-button" onClick={cancelMcpDraft} disabled={!!loadingLabel}>
+                        <button className="tool-button" onClick={cancelMcpDraft} disabled={isLoading('mcp')}>
                           <Icon name="x" />Cancel edit
                         </button>
                       )}
-                      <button className="tool-button" onClick={() => void checkMcpHealth()} disabled={!!loadingLabel}>
+                      <button className="tool-button" onClick={() => void checkMcpHealth()} disabled={isLoading('mcp')}>
                         <Icon name="refresh" />Check health
                       </button>
                     </div>
@@ -12755,13 +13185,13 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                             {server.url && <code>{server.url}</code>}
                             {server.args?.length ? <code>{server.args.join(' ')}</code> : null}
                             <div className="section-actions" onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
-                              <button className="tool-button" onClick={() => handleMcpInspectClick(server, 'user')} disabled={!!loadingLabel}>
+                              <button className="tool-button" onClick={() => handleMcpInspectClick(server, 'user')} disabled={isLoading('mcp')}>
                                 <Icon name="file" />Inspect
                               </button>
-                              <button className="tool-button" onClick={() => handleMcpEditClick(server, 'user')} disabled={!!loadingLabel}>
+                              <button className="tool-button" onClick={() => handleMcpEditClick(server, 'user')} disabled={isLoading('mcp')}>
                                 <Icon name="pencil" />Edit
                               </button>
-                              <button className="tool-button danger" onClick={() => handleMcpRemoveClick(server, 'user')} disabled={!!loadingLabel}>
+                              <button className="tool-button danger" onClick={() => handleMcpRemoveClick(server, 'user')} disabled={isLoading('mcp')}>
                                 <Icon name="trash" />Remove
                               </button>
                             </div>
@@ -12789,19 +13219,19 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                             {server.url && <code>{server.url}</code>}
                             {server.args?.length ? <code>{server.args.join(' ')}</code> : null}
                             <div className="section-actions" onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
-                              <button className="tool-button" onClick={() => handleMcpInspectClick(server, 'project')} disabled={!activeSession || !!loadingLabel}>
+                              <button className="tool-button" onClick={() => handleMcpInspectClick(server, 'project')} disabled={!activeSession || isLoading('mcp')}>
                                 <Icon name="file" />Inspect
                               </button>
-                              <button className="tool-button" onClick={() => handleMcpEditClick(server, 'project')} disabled={!activeSession || !!loadingLabel}>
+                              <button className="tool-button" onClick={() => handleMcpEditClick(server, 'project')} disabled={!activeSession || isLoading('mcp')}>
                                 <Icon name="pencil" />Edit
                               </button>
-                              <button className="tool-button" onClick={() => approveProjectMcpServer(server)} disabled={!activeSession || server.approvalStatus === 'approved' || !!loadingLabel}>
+                              <button className="tool-button" onClick={() => approveProjectMcpServer(server)} disabled={!activeSession || server.approvalStatus === 'approved' || isLoading('mcp')}>
                                 <Icon name="check" />Approve
                               </button>
-                              <button className="tool-button" onClick={() => rejectProjectMcpServer(server)} disabled={!activeSession || server.approvalStatus === 'rejected' || !!loadingLabel}>
+                              <button className="tool-button" onClick={() => rejectProjectMcpServer(server)} disabled={!activeSession || server.approvalStatus === 'rejected' || isLoading('mcp')}>
                                 <Icon name="x" />Reject
                               </button>
-                              <button className="tool-button danger" onClick={() => handleMcpRemoveClick(server, 'project')} disabled={!activeSession || !!loadingLabel}>
+                              <button className="tool-button danger" onClick={() => handleMcpRemoveClick(server, 'project')} disabled={!activeSession || isLoading('mcp')}>
                                 <Icon name="trash" />Remove
                               </button>
                             </div>
@@ -12827,7 +13257,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                   <h3>MCP Health Check</h3>
                   <p className="section-copy">Verify connectivity and tool listing for all configured MCP servers.</p>
                   <div className="section-actions">
-                    <button className="tool-button" onClick={() => void checkMcpHealth()} disabled={!!loadingLabel}>
+                    <button className="tool-button" onClick={() => void checkMcpHealth()} disabled={isLoading('mcp')}>
                       <Icon name="refresh" />Run health check
                     </button>
                   </div>
@@ -12860,7 +13290,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                   </span>
                   <div className="pane-toolbar-actions">
                     {loadingLabel && <span className="pane-loading-status" role="status">{loadingLabel}</span>}
-                    <button className="tool-button" onClick={handleSettingsRefreshClick} disabled={!!loadingLabel}>
+                    <button className="tool-button" onClick={handleSettingsRefreshClick} disabled={isLoading('config')}>
                       <Icon name="refresh" />Refresh
                     </button>
                   </div>
@@ -12890,10 +13320,10 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                             <strong>{skill.name}</strong>
                             <small>user · {skill.path}</small>
                             <div className="section-actions" onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
-                              <button className="tool-button" onClick={() => handleSkillInspectClick(skill, 'user')} disabled={!!loadingLabel}>
+                              <button className="tool-button" onClick={() => handleSkillInspectClick(skill, 'user')} disabled={isLoading('mcp')}>
                                 <Icon name="file" />View
                               </button>
-                              <button className="tool-button danger" onClick={() => handleSkillRemoveClick(skill, 'user')} disabled={!!loadingLabel}>
+                              <button className="tool-button danger" onClick={() => handleSkillRemoveClick(skill, 'user')} disabled={isLoading('mcp')}>
                                 <Icon name="trash" />Remove
                               </button>
                             </div>
@@ -12917,10 +13347,10 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                             <strong>{skill.name}</strong>
                             <small>project · {skill.path}</small>
                             <div className="section-actions" onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
-                              <button className="tool-button" onClick={() => handleSkillInspectClick(skill, 'project')} disabled={!activeSession || !!loadingLabel}>
+                              <button className="tool-button" onClick={() => handleSkillInspectClick(skill, 'project')} disabled={!activeSession || isLoading('mcp')}>
                                 <Icon name="file" />View
                               </button>
-                              <button className="tool-button danger" onClick={() => handleSkillRemoveClick(skill, 'project')} disabled={!activeSession || !!loadingLabel}>
+                              <button className="tool-button danger" onClick={() => handleSkillRemoveClick(skill, 'project')} disabled={!activeSession || isLoading('mcp')}>
                                 <Icon name="trash" />Remove
                               </button>
                             </div>
@@ -12949,7 +13379,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                       <select
                         value={skillDraft?.scope ?? 'user'}
                         aria-label="Skill scope"
-                        disabled={skillDraftSessionBlocked || !!loadingLabel}
+                        disabled={skillDraftSessionBlocked || isLoading('mcp')}
                         onChange={event => startSkillDraft(event.target.value as 'user' | 'project')}
                       >
                         <option value="user">user scope</option>
@@ -12962,21 +13392,21 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                         onChange={event => setSkillDraft(prev => prev ? { ...prev, name: event.target.value } : { scope: 'user', name: event.target.value })}
                         placeholder="skill name (e.g. my-skill)"
                         aria-label="Skill name"
-                        disabled={skillDraftSessionBlocked || !!loadingLabel}
+                        disabled={skillDraftSessionBlocked || isLoading('mcp')}
                       />
                     </div>
                     <div className="form-note">
                       Skill content is managed via SKILL.md file. After creation, edit the SKILL.md directly.
                     </div>
                     <div className="section-actions">
-                      <button className="tool-button" onClick={handleSkillSaveClick} disabled={!canSaveSkillDraft(skillDraft, Boolean(activeSession)) || !!loadingLabel}>
+                      <button className="tool-button" onClick={handleSkillSaveClick} disabled={!canSaveSkillDraft(skillDraft, Boolean(activeSession)) || isLoading('mcp')}>
                         <Icon name="plus" />Create skill
                       </button>
-                      <button className="tool-button" onClick={() => void installLocalSkill()} disabled={skillDraft?.scope === 'project' && !activeSession || !!loadingLabel}>
+                      <button className="tool-button" onClick={() => void installLocalSkill()} disabled={skillDraft?.scope === 'project' && !activeSession || isLoading('mcp')}>
                         <Icon name="plus" />Install local skill
                       </button>
                       {skillDraft?.scope === 'project' && (
-                        <button className="tool-button" onClick={() => void installProjectSkill()} disabled={!activeSession || !!loadingLabel}>
+                        <button className="tool-button" onClick={() => void installProjectSkill()} disabled={!activeSession || isLoading('mcp')}>
                           <Icon name="plus" />Install to project
                         </button>
                       )}
@@ -13006,7 +13436,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
               >
                 <div className="settings-layout">
                   <aside className="settings-sidebar" aria-label="Settings navigation">
-                    <button className="settings-back-button" onClick={handleSettingsBackClick} disabled={!!loadingLabel}>
+                    <button className="settings-back-button" onClick={handleSettingsBackClick} disabled={isLoading('config')}>
                       <Icon name="chevron-left" />Back to app
                     </button>
                     <input
@@ -13016,7 +13446,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                       placeholder="Search settings..."
                       aria-label="Search settings"
                       aria-describedby="settings-search-results"
-                      disabled={!!loadingLabel}
+                      disabled={isLoading('config')}
                       role="combobox"
                       aria-expanded="true"
                       aria-controls="settings-nav-listbox"
@@ -13064,7 +13494,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                       </div>
                       <div className="pane-toolbar-actions">
                         {loadingLabel && <span className="pane-loading-status" role="status">{loadingLabel}</span>}
-                        <button className="tool-button" onClick={handleSettingsRefreshClick} disabled={!!loadingLabel}>
+                        <button className="tool-button" onClick={handleSettingsRefreshClick} disabled={isLoading('config')}>
                           <Icon name="refresh" />Refresh
                         </button>
                       </div>
@@ -13108,8 +13538,22 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                       <code>{desktopConfig?.localSettingsExists ? desktopConfig.localSettingsPath : 'Not found'}</code>
                     </div>
                   </div>
+                  <h3>Built-in Capabilities</h3>
+                  <div className="settings-grid">
+                    <div>
+                      <strong><Icon name="monitor" /> computer-use</strong>
+                      <small>GUI automation — control local apps, screenshots, keyboard/mouse</small>
+                      <code>mcp__computer-use__*</code>
+                    </div>
+                    <div>
+                      <strong><Icon name="globe" /> browser</strong>
+                      <small>Web browser — open, navigate, inspect pages, screenshots</small>
+                      <code>WebBrowser tool</code>
+                    </div>
+                  </div>
+                  <p className="section-copy">Use <code>@computer-use</code> or <code>@browser</code> in the composer to explicitly invoke these capabilities in your message.</p>
                   <div className="section-actions">
-                    <button className="tool-button" onClick={handleDiagnosticsExportClick} disabled={!!loadingLabel}>
+                    <button className="tool-button" onClick={handleDiagnosticsExportClick} disabled={isLoading('config')}>
                       <Icon name="clipboard" />Export diagnostics
                     </button>
                   </div>
@@ -13123,7 +13567,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                       type="checkbox"
                       checked={proxyDraft.enabled}
                       aria-label="Enable proxy for Claude Code runtime"
-                      disabled={!!loadingLabel}
+                      disabled={isLoading('config')}
                       onChange={handleProxyEnabledChange}
                     />
                     Enable proxy for Claude Code runtime
@@ -13134,9 +13578,9 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                       onChange={handleProxyUrlChange}
                       placeholder="socks5://127.0.0.1:7890"
                       aria-label="Proxy URL"
-                      disabled={!!loadingLabel}
+                      disabled={isLoading('config')}
                     />
-                    <button className="tool-button" onClick={handleProxySaveClick} disabled={!canSaveProxy || !!loadingLabel}>
+                    <button className="tool-button" onClick={handleProxySaveClick} disabled={!canSaveProxy || isLoading('config')}>
                       <Icon name="save" />Save
                     </button>
                   </div>
@@ -13157,12 +13601,12 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                         onChange={handlePluginDraftPackageChange}
                         placeholder="plugin or plugin@marketplace"
                         aria-label="Plugin package"
-                        disabled={pluginDraftSessionBlocked || !!loadingLabel}
+                        disabled={pluginDraftSessionBlocked || isLoading('config')}
                       />
                       <select
                         value={pluginDraft.scope}
                         aria-label="Plugin install scope"
-                        disabled={!!loadingLabel}
+                        disabled={isLoading('config')}
                         onChange={handlePluginDraftScopeChange}
                       >
                         <option value="user">user scope</option>
@@ -13176,10 +13620,10 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                       </div>
                     )}
                     <div className="section-actions">
-                      <button className="tool-button" onClick={handlePluginListClick} disabled={!!loadingLabel || !canRunPluginCommand}>
+                      <button className="tool-button" onClick={handlePluginListClick} disabled={isLoading('config') || !canRunPluginCommand}>
                         <Icon name="refresh" />List plugins
                       </button>
-                      <button className="tool-button" onClick={handlePluginInstallClick} disabled={!!loadingLabel || !canInstallPlugin}>
+                      <button className="tool-button" onClick={handlePluginInstallClick} disabled={isLoading('config') || !canInstallPlugin}>
                         <Icon name="plus" />Install plugin
                       </button>
                     </div>
@@ -13222,21 +13666,21 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                             <button
                               className="tool-button"
                               onClick={event => handlePluginUpdateClick(event, plugin)}
-                              disabled={!canSelectPlugin(plugin) || !!loadingLabel}
+                              disabled={!canSelectPlugin(plugin) || isLoading('config')}
                             >
                               <Icon name="refresh" />Update
                             </button>
                             <button
                               className="tool-button"
                               onClick={event => handlePluginToggleClick(event, plugin, !pluginEnabled)}
-                              disabled={!canSelectPlugin(plugin) || !!loadingLabel}
+                              disabled={!canSelectPlugin(plugin) || isLoading('config')}
                             >
                               {pluginEnabled ? <><Icon name="pause" />Disable</> : <><Icon name="play" />Enable</>}
                             </button>
                             <button
                               className="tool-button danger"
                               onClick={event => handlePluginUninstallClick(event, plugin)}
-                              disabled={!canSelectPlugin(plugin) || !!loadingLabel}
+                              disabled={!canSelectPlugin(plugin) || isLoading('config')}
                             >
                               <Icon name="trash" />Remove
                             </button>
@@ -13278,7 +13722,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                 onChange={handleCommandPaletteQueryChange}
                 placeholder="Search commands"
                 aria-label="Search commands"
-                disabled={!!loadingLabel}
+                disabled={isLoading('session')}
                 role="combobox"
                 aria-expanded="true"
                 aria-controls="command-palette-list"
@@ -13299,26 +13743,33 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
               </div>
             )}
             <div id="command-palette-list" className="command-palette-list" role="listbox" aria-label="Commands">
-              {commandPaletteItemsForQuery.length ? commandPaletteItemsForQuery.map((item, index) => (
-                <button
-                  key={item.id}
-                  id={commandPaletteOptionId(item)}
-                  type="button"
-                  role="option"
-                  aria-selected={index === commandPaletteActiveIndex}
-                  aria-disabled={item.disabled ? 'true' : undefined}
-                  tabIndex={item.disabled ? -1 : 0}
-                  className={index === commandPaletteActiveIndex ? 'active' : undefined}
-                  onMouseEnter={() => !item.disabled && setCommandPaletteActiveIndex(index)}
-                  onClick={() => runCommandPaletteItem(item)}
-                >
-                  <Icon name={item.icon} />
-                  <span>
-                    <strong>{item.label}</strong>
-                    <small>{item.disabled ? `${item.detail} · ${item.disabledReason ?? 'unavailable'}` : item.detail}</small>
-                  </span>
-                </button>
-              )) : (
+              {commandPaletteItemsForQuery.length ? commandPaletteItemsForQuery.flatMap((item, index) => {
+                const prevItem = index > 0 ? commandPaletteItemsForQuery[index - 1] : undefined
+                const showGroupHeader = item.group && (!prevItem || prevItem.group !== item.group)
+                return [
+                  ...(showGroupHeader && item.group ? [
+                    <div key={`group-${item.group}`} className="command-palette-group-header" role="presentation">{item.group}</div>,
+                  ] : []),
+                  <button
+                    key={item.id}
+                    id={commandPaletteOptionId(item)}
+                    type="button"
+                    role="option"
+                    aria-selected={index === commandPaletteActiveIndex}
+                    aria-disabled={item.disabled ? 'true' : undefined}
+                    tabIndex={item.disabled ? -1 : 0}
+                    className={index === commandPaletteActiveIndex ? 'active' : undefined}
+                    onMouseEnter={() => !item.disabled && setCommandPaletteActiveIndex(index)}
+                    onClick={() => runCommandPaletteItem(item)}
+                  >
+                    <Icon name={item.icon} />
+                    <span>
+                      <strong>{item.label}</strong>
+                      <small>{item.disabled ? `${item.detail} · ${item.disabledReason ?? 'unavailable'}` : item.detail}</small>
+                    </span>
+                  </button>,
+                ]
+              }) : (
                 <div className="command-palette-empty" role="status">
                   <Icon name="search" />
                   <strong>No matching commands</strong>
@@ -13334,7 +13785,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
         <div
           className="modal-backdrop"
           onClick={event => {
-            if (event.target === event.currentTarget && !loadingLabel) {
+            if (event.target === event.currentTarget && !isLoading('session')) {
               settleConfirmation(false)
             }
           }}
@@ -13344,14 +13795,14 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
             <h2 id="confirmation-title">{confirmRequest.title}</h2>
             <p>{confirmRequest.message}</p>
             <div className="modal-actions">
-              <button ref={confirmCancelButtonRef} className="tool-button" onClick={() => resolveConfirmationModal(false)} disabled={!!loadingLabel}>
+              <button ref={confirmCancelButtonRef} className="tool-button" onClick={() => resolveConfirmationModal(false)} disabled={isLoading('session')}>
                 <Icon name="x" />
                 {confirmRequest.cancelLabel ?? 'Cancel'}
               </button>
               <button
                 className={confirmRequest.tone === 'danger' ? 'tool-button danger strong' : 'send-button'}
                 onClick={() => resolveConfirmationModal(true)}
-                disabled={!!loadingLabel}
+                disabled={isLoading('session')}
               >
                 <Icon name={confirmRequest.tone === 'danger' ? 'trash' : 'play'} />
                 {confirmRequest.confirmLabel}
@@ -13361,11 +13812,11 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
         </div>
       )}
 
-      {pendingPermission && (
+      {pendingPermission && pendingPermission.toolName !== 'ExitPlanMode' && (
         <div
           className="modal-backdrop"
           onClick={event => {
-            if (event.target === event.currentTarget && !loadingLabel && !permissionResponding) {
+            if (event.target === event.currentTarget && !isLoading('session') && !permissionResponding) {
               void respondToPermission('deny')
             }
           }}
@@ -13407,13 +13858,13 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
             )}
             {pendingPermission.error && <div className="inline-error">{pendingPermission.error}</div>}
             <div className="modal-actions">
-              <button className="tool-button" onClick={handlePermissionCancelTurnClick} disabled={!cancelAvailable || !!loadingLabel || permissionResponding}>
+              <button className="tool-button" onClick={handlePermissionCancelTurnClick} disabled={!cancelAvailable || isLoading('session') || permissionResponding}>
                 <Icon name="square" />Cancel turn
               </button>
-              <button ref={permissionDenyButtonRef} className="tool-button" onClick={() => handlePermissionResponseClick('deny')} disabled={!!loadingLabel || permissionResponding}>
+              <button ref={permissionDenyButtonRef} className="tool-button" onClick={() => handlePermissionResponseClick('deny')} disabled={isLoading('session') || permissionResponding}>
                 <Icon name="x" />Deny
               </button>
-              <button ref={permissionAllowButtonRef} className="send-button" onClick={() => handlePermissionResponseClick('allow')} disabled={!!loadingLabel || permissionResponding}>
+              <button ref={permissionAllowButtonRef} className="send-button" onClick={() => handlePermissionResponseClick('allow')} disabled={isLoading('session') || permissionResponding}>
                 <Icon name="check" />{permissionResponding ? 'Sending...' : 'Allow'}
               </button>
             </div>
