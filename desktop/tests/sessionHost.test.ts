@@ -185,11 +185,15 @@ describe('createSessionHost', () => {
       'sonnet',
       '--permission-mode',
       'plan',
+      '--permission-prompt-tool',
+      'stdio',
       '--worktree',
     ]))
     expect(spawnedArgs[1]).toEqual(expect.arrayContaining([
       '--resume',
       'session-1',
+      '--permission-prompt-tool',
+      'stdio',
     ]))
     expect(spawnedArgs[1]).not.toContain('--agent')
     expect(spawnedArgs[1]).not.toContain('--worktree')

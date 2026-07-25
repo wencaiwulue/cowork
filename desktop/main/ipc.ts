@@ -477,8 +477,9 @@ export type DesktopQuestion = {
 
 export type DesktopMessage = {
   id: string
-  role: 'user' | 'assistant' | 'thinking' | 'system' | 'tool'
+  role: 'user' | 'assistant' | 'thinking' | 'system' | 'tool' | 'tool_output'
   text: string
+  timestamp: number
   streaming?: boolean
   raw?: unknown
   attachments?: DesktopAttachment[]

@@ -253,6 +253,7 @@ export class DesktopSessionManager {
       id: randomUUID(),
       role: 'user',
       text,
+      timestamp: Date.now(),
       ...(attachments?.length ? { attachments } : {}),
     }
     session.messages.push(message)
@@ -285,6 +286,7 @@ export class DesktopSessionManager {
       id: randomUUID(),
       role: 'system',
       text: 'Cancellation requested',
+      timestamp: Date.now(),
     })
     session.updatedAt = Date.now()
     await this.persist()
@@ -523,6 +525,7 @@ export class DesktopSessionManager {
         id: update.id ?? randomUUID(),
         role: update.role,
         text: '',
+        timestamp: Date.now(),
         streaming: true,
         raw: update.raw,
       }

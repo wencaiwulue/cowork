@@ -5446,3 +5446,72 @@ button:focus-visible {
 .workarea-empty .empty-actions {
   margin-top: 10px;
 }
+
+/* Message timestamps */
+.message-time {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.message-role {
+  font-weight: 600;
+}
+
+/* Tool output (bash/slash command results) — muted styling */
+.message-tool_output .message-plain,
+.message-tool_output .message-markdown {
+  border-color: var(--hairline);
+  background: var(--surface-2, #f7f5f0);
+  color: var(--muted);
+}
+
+.message-tool_output .message-role {
+  color: var(--muted);
+}
+
+/* System messages (interruptions, cancellations) */
+.message-system .message-plain,
+.message-system .message-markdown {
+  border-color: rgba(200, 140, 50, 0.3);
+  background: #fdf8ee;
+  color: #8a6a2a;
+  font-style: italic;
+}
+
+.message-system .message-role {
+  color: #b08030;
+}
+
+.message-muted .message-plain,
+.message-muted .message-markdown {
+  opacity: 0.75;
+}
+
+/* Conversation retry bar */
+.conversation-retry {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.conversation-retry .tool-button {
+  gap: 6px;
+  font-size: 12px;
+}
+
+[data-theme="dark"] .message-tool_output .message-plain,
+[data-theme="dark"] .message-tool_output .message-markdown {
+  background: #232326;
+  border-color: #3a3a3f;
+  color: #9a9aa2;
+}
+
+[data-theme="dark"] .message-system .message-plain,
+[data-theme="dark"] .message-system .message-markdown {
+  background: #2a2518;
+  border-color: #5a4a20;
+  color: #c4a860;
+}

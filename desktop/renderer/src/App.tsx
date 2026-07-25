@@ -767,6 +767,7 @@ function messageClass(message: DesktopMessage): string {
     'message',
     `message-${message.role}`,
     message.streaming ? 'message-streaming' : '',
+    (message.role === 'tool_output' || message.role === 'system') ? 'message-muted' : '',
   ].filter(Boolean).join(' ')
 }
 
@@ -780,15 +781,19 @@ function messageRoleLabel(role: DesktopMessage['role']): string {
       return 'Thinking'
     case 'tool':
       return 'Tool'
+    case 'tool_output':
+      return 'Shell'
     case 'system':
       return 'System'
   }
 }
 
 function messageStatusLabel(message: DesktopMessage): string | undefined {
-  if (message.role !== 'assistant' && message.role !== 'thinking') return undefined
-  if (message.streaming) return 'Streaming'
-  return message.role === 'thinking' ? 'Complete' : undefined
+  if (message.role === 'assistant' || message.role === 'thinking') {
+    if (message.streaming) return 'Streaming'
+    return message.role === 'thinking' ? 'Complete' : undefined
+  }
+  return undefined
 }
 
 function messageText(message: DesktopMessage): string {
@@ -1091,9 +1096,11 @@ function isTurnBusy(session?: DesktopSession): boolean {
 function canCancelTurn(session?: DesktopSession): boolean {
   return Boolean(
     session &&
-    (session.activity === 'sending' ||
+    (session.activity === 'starting' ||
+      session.activity === 'sending' ||
       session.activity === 'streaming' ||
-      session.activity === 'waiting_permission'),
+      session.activity === 'waiting_permission' ||
+      session.activity === 'cancelling'),
   )
 }
 
@@ -2094,6 +2101,8 @@ export function App() {
   const messageListRef = useRef<HTMLElement>(null)
   const composerTextareaRef = useRef<HTMLTextAreaElement>(null)
   const teamMessageTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const composerHistoryIndexRef = useRef(0)
+  const composerDraftBackupRef = useRef('')
   const commandPaletteRef = useRef<HTMLElement>(null)
   const commandPaletteInputRef = useRef<HTMLInputElement>(null)
   const commandPaletteReturnFocusRef = useRef<HTMLElement | null>(null)
@@ -5127,8 +5136,77 @@ export function App() {
     textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden'
   }
 
+  function isCursorOnFirstLine(textarea: HTMLTextAreaElement): boolean {
+    const cursorPos = textarea.selectionStart
+    const value = textarea.value
+    const prevNewline = value.lastIndexOf('\n', cursorPos - 1)
+    return prevNewline === -1
+  }
+
+  function isCursorOnLastLine(textarea: HTMLTextAreaElement): boolean {
+    const cursorPos = textarea.selectionStart
+    const value = textarea.value
+    const nextNewline = value.indexOf('\n', cursorPos)
+    return nextNewline === -1
+  }
+
+  function navigateComposerHistory(direction: 1 | -1): void {
+    const textarea = composerTextareaRef.current
+    if (!textarea || !activeSession) return
+    const userMessages = activeSession.messages
+      .filter(m => m.role === 'user' && m.text.trim())
+      .reverse()
+    if (direction === 1) {
+      if (composerHistoryIndexRef.current === 0) {
+        composerDraftBackupRef.current = input
+      }
+      const nextIndex = composerHistoryIndexRef.current + 1
+      if (nextIndex > userMessages.length) return
+      composerHistoryIndexRef.current = nextIndex
+      const entry = userMessages[nextIndex - 1]!
+      setInput(entry.text)
+      setComposerCursor(0)
+      requestAnimationFrame(() => {
+        const ta = composerTextareaRef.current
+        if (ta) {
+          ta.setSelectionRange(0, 0)
+          autoResizeComposer()
+        }
+      })
+    } else {
+      if (composerHistoryIndexRef.current <= 0) return
+      const nextIndex = composerHistoryIndexRef.current - 1
+      composerHistoryIndexRef.current = nextIndex
+      if (nextIndex === 0) {
+        setInput(composerDraftBackupRef.current)
+        setComposerCursor(composerDraftBackupRef.current.length)
+        requestAnimationFrame(() => {
+          const ta = composerTextareaRef.current
+          if (ta) {
+            const len = ta.value.length
+            ta.setSelectionRange(len, len)
+            autoResizeComposer()
+          }
+        })
+      } else {
+        const entry = userMessages[nextIndex - 1]!
+        setInput(entry.text)
+        setComposerCursor(entry.text.length)
+        requestAnimationFrame(() => {
+          const ta = composerTextareaRef.current
+          if (ta) {
+            const len = ta.value.length
+            ta.setSelectionRange(len, len)
+            autoResizeComposer()
+          }
+        })
+      }
+    }
+  }
+
   function handleComposerInputChange(event: ReactChangeEvent<HTMLTextAreaElement>): void {
     if (isLoading('session')) return
+    composerHistoryIndexRef.current = 0
     setInput(event.target.value)
     updateComposerSelection(event.target)
     autoResizeComposer()
@@ -5173,6 +5251,22 @@ export function App() {
         composerMenuActiveIndexRef.current = nextIndex
         return nextIndex
       })
+      return
+    }
+    if (!currentComposerTrigger && event.key === 'ArrowUp') {
+      const ta = composerTextareaRef.current
+      if (ta && isCursorOnFirstLine(ta)) {
+        event.preventDefault()
+        navigateComposerHistory(1)
+      }
+      return
+    }
+    if (!currentComposerTrigger && event.key === 'ArrowDown') {
+      const ta = composerTextareaRef.current
+      if (ta && isCursorOnLastLine(ta)) {
+        event.preventDefault()
+        navigateComposerHistory(-1)
+      }
       return
     }
     if (currentComposerTrigger && composerMenuItems.length && event.key === 'Home') {
@@ -5419,6 +5513,8 @@ export function App() {
 
 
   async function sendMessage(): Promise<void> {
+    composerHistoryIndexRef.current = 0
+    composerDraftBackupRef.current = ''
     if (!activeSession) {
       setConversationNotice({ kind: 'error', text: 'Select a session before sending a message.' })
       return
@@ -5598,6 +5694,33 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
   function handleCancelTurnClick(): void {
     if (isLoading('session')) return
     void cancelSession()
+  }
+
+  async function retryLastMessage(): Promise<void> {
+    if (!activeSession) {
+      setConversationNotice({ kind: 'error', text: 'Select a session before retrying.' })
+      return
+    }
+    if (turnBusy) {
+      setConversationNotice({ kind: 'info', text: 'Wait for the current turn to finish before retrying.' })
+      return
+    }
+    if (sendActionPendingRef.current) return
+    const session = activeSession
+    const lastUser = [...session.messages].reverse().find(m => m.role === 'user' && m.text.trim())
+    if (!lastUser) {
+      setConversationNotice({ kind: 'info', text: 'No previous user message to retry.' })
+      return
+    }
+    const retryText = lastUser.text.trim()
+    sendActionPendingRef.current = true
+    try {
+      await runAction('session', 'Retrying last message', async () => {
+        await window.claudeDesktop.sessions.send(session.id, retryText, undefined)
+      })
+    } finally {
+      sendActionPendingRef.current = false
+    }
   }
 
   async function clearDesktopTranscriptView(): Promise<void> {
@@ -11541,7 +11664,12 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
               return (
                 <article key={message.id} className={messageClass(message)}>
                   <div className="message-label">
-                    <span>{messageRoleLabel(message.role)}</span>
+                    <span className="message-role">{messageRoleLabel(message.role)}</span>
+                    {typeof message.timestamp === 'number' && (
+                      <time className="message-time" dateTime={new Date(message.timestamp).toISOString()}>
+                        {formatTime(message.timestamp)}
+                      </time>
+                    )}
                     {messageStatusLabel(message) && (
                       <span className="message-stream-label">
                         {messageStatusLabel(message)}
@@ -11589,6 +11717,19 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
               <div className={`conversation-status ${conversationStatusKind}`} role="status">
                 {liveConversationStatus && <span className="activity-pulse" />}
                 <span>{conversationStatus}</span>
+              </div>
+            )}
+            {activeSession && !turnBusy && activeSession.messages.some(m => m.role === 'user') && (
+              <div className="conversation-retry">
+                <button
+                  className="tool-button"
+                  type="button"
+                  onClick={() => void retryLastMessage()}
+                  disabled={isLoading('session') || sendActionPendingRef.current}
+                  title="Retry last user message"
+                >
+                  <Icon name="refresh" />Retry last message
+                </button>
               </div>
             )}
           </section>

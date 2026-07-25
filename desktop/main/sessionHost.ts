@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
+import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { existsSync } from 'node:fs'
@@ -120,12 +121,14 @@ export function createSessionHost(options: SessionHostOptions): SessionHost {
   const runtime = resolveCliRuntime(import.meta.url, env)
   let spawnedRuntimeCount = 0
   const spawnRuntimeChild = () => {
-    const sessionArgs =
-      spawnedRuntimeCount === 0
-        ? ['--session-id', options.sessionId]
-        : ['--resume', options.sessionId]
+    const isFirstSpawn = spawnedRuntimeCount === 0
+    const transcriptExists = sessionTranscriptExists(options.sessionId, options.cwd)
+    const isNewSession = isFirstSpawn && !transcriptExists
+    const sessionArgs = isNewSession
+      ? ['--session-id', options.sessionId]
+      : ['--resume', options.sessionId]
     const agentArgs =
-      spawnedRuntimeCount === 0 && options.agent
+      isNewSession && options.agent
         ? buildAgentArgs(options.agent)
         : []
     const args = [
@@ -135,6 +138,8 @@ export function createSessionHost(options: SessionHostOptions): SessionHost {
         'stream-json',
         '--output-format',
         'stream-json',
+        '--permission-prompt-tool',
+        'stdio',
         '--replay-user-messages',
         '--verbose',
         ...sessionArgs,
@@ -323,4 +328,19 @@ function buildAgentArgs(agent: NonNullable<SessionHostOptions['agent']>): string
   if (agent.permissionMode) args.push('--permission-mode', agent.permissionMode)
   if (agent.isolation === 'worktree') args.push('--worktree')
   return args
+}
+
+function sanitizeProjectPath(name: string): string {
+  return name.replace(/[^a-zA-Z0-9]/g, '-')
+}
+
+function sessionTranscriptExists(sessionId: string, cwd: string): boolean {
+  const configHome = process.env.CLAUDE_CONFIG_HOME || join(homedir(), '.claude')
+  const projectDir = join(configHome, 'projects', sanitizeProjectPath(cwd))
+  const sessionFile = join(projectDir, `${sessionId}.jsonl`)
+  try {
+    return existsSync(sessionFile)
+  } catch {
+    return false
+  }
 }

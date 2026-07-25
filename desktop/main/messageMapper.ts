@@ -79,6 +79,83 @@ function extractQuestion(value: unknown): DesktopQuestion | undefined {
   return undefined
 }
 
+
+const INTERRUPT_MESSAGE = '[Request interrupted by user]'
+const INTERRUPT_MESSAGE_FOR_TOOL_USE = '[Request interrupted by user for tool use]'
+const LOCAL_COMMAND_CAVEAT_TAG_OPEN = '<local-command-caveat>'
+
+type ClassifiedUserMessage = {
+  role: DesktopMessage['role']
+  text: string
+  skip?: boolean
+}
+
+function stripOuterTag(text: string, tag: string): string {
+  const open = `<${tag}>`
+  const close = `</${tag}>`
+  const oi = text.indexOf(open)
+  const ci = text.lastIndexOf(close)
+  if (oi >= 0 && ci > oi) {
+    return text.slice(oi + open.length, ci).trim()
+  }
+  return text
+}
+
+function classifyUserMessage(rawText: string): ClassifiedUserMessage {
+  const text = rawText.trim()
+  if (!text) return { role: 'user', text: '' }
+
+  // Interruption notices are system messages, not user text
+  if (text === INTERRUPT_MESSAGE || text === INTERRUPT_MESSAGE_FOR_TOOL_USE) {
+    return { role: 'system', text }
+  }
+
+  // Local command caveat — synthetic, skip
+  if (text.includes(LOCAL_COMMAND_CAVEAT_TAG_OPEN)) {
+    return { role: 'system', text, skip: true }
+  }
+
+  // Command-message breadcrumb or bash-input breadcrumb — not user content
+  if (text.includes('<command-message>') || text.includes('<bash-input>')) {
+    return { role: 'system', text, skip: true }
+  }
+
+  // Tick tags — skip
+  if (text.includes('<tick>') || text === '<tick/>' || /^<tick>.*<\/tick>$/s.test(text)) {
+    return { role: 'system', text, skip: true }
+  }
+
+  // Bash stdout/stderr output
+  if (text.includes('<bash-stdout>') || text.includes('<bash-stderr>')) {
+    let out = ''
+    const stdoutMatch = text.match(/<bash-stdout>([\s\S]*?)<\/bash-stdout>/)
+    const stderrMatch = text.match(/<bash-stderr>([\s\S]*?)<\/bash-stderr>/)
+    if (stdoutMatch) out += stdoutMatch[1].trim()
+    if (stderrMatch) out += (out ? '\n' : '') + stderrMatch[1].trim()
+    return { role: 'tool_output', text: out || text }
+  }
+
+  // Local command (slash command) output
+  if (text.includes('<local-command-stdout>') || text.includes('<local-command-stderr>')) {
+    let out = ''
+    const stdoutMatch = text.match(/<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/)
+    const stderrMatch = text.match(/<local-command-stderr>([\s\S]*?)<\/local-command-stderr>/)
+    if (stdoutMatch) out += stdoutMatch[1].trim()
+    if (stderrMatch) out += (out ? '\n' : '') + stderrMatch[1].trim()
+    return { role: 'tool_output', text: out || stripOuterTag(text, 'local-command-stdout') }
+  }
+
+  // User-memory-input and other XML breadcrumbs — skip
+  if (text.includes('<user-memory-input>') || text.includes('<task_notification') ||
+      text.includes('<teammate-message') || text.includes('<mcp-resource-update') ||
+      text.includes('<fork-boilerplate>') || text.includes('<cross-session-message') ||
+      text.includes('<channel source=')) {
+    return { role: 'system', text, skip: true }
+  }
+
+  return { role: 'user', text }
+}
+
 function messageId(message: { type: string; uuid?: string }): string {
   return message.uuid ??
     `${message.type}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
@@ -117,6 +194,7 @@ function streamedToolUse(raw: unknown): DesktopMessage | null {
     id: typeof block.id === 'string' ? block.id : messageId({ type: 'tool', uuid: typeof message.uuid === 'string' ? message.uuid : undefined }),
     role: 'tool',
     text: `Using ${name}...`,
+    timestamp: Date.now(),
     raw,
   }
 }
@@ -155,10 +233,14 @@ export function toDesktopMessages(raw: unknown): DesktopMessage[] {
 
   if (message.type === 'user') {
     if (containsToolResult(message.message)) return []
+    const rawText = extractText(message.message)
+    const classified = classifyUserMessage(rawText)
+    if (classified.skip || !classified.text) return []
     return [{
       id,
-      role: 'user',
-      text: extractText(message.message),
+      role: classified.role,
+      text: classified.text,
+      timestamp: Date.now(),
       raw,
     }]
   }
@@ -167,11 +249,13 @@ export function toDesktopMessages(raw: unknown): DesktopMessage[] {
     const text = extractText(message.message)
     const thinking = extractThinking(message.message)
     const messages: DesktopMessage[] = []
+    const now = Date.now()
     if (thinking) {
       messages.push({
         id: text ? `${id}:thinking` : id,
         role: 'thinking',
         text: thinking,
+        timestamp: now,
         raw,
       })
     }
@@ -181,6 +265,7 @@ export function toDesktopMessages(raw: unknown): DesktopMessage[] {
         id,
         role: 'assistant',
         text,
+        timestamp: now,
         ...(question ? { question } : {}),
         raw,
       })
@@ -196,6 +281,7 @@ export function toDesktopMessages(raw: unknown): DesktopMessage[] {
       id,
       role: 'assistant',
       text,
+      timestamp: Date.now(),
       raw,
     }]
   }
@@ -209,6 +295,7 @@ export function toDesktopMessages(raw: unknown): DesktopMessage[] {
       text:
         message.request?.description ??
         `${message.request?.tool_name ?? 'Tool'} requires permission`,
+      timestamp: Date.now(),
       raw,
     }]
   }
