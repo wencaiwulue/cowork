@@ -120,6 +120,19 @@ export function applyDesktopRuntimeEnv(
     ...baseEnv,
     ...settingsEnv,
   }
+  // Enable Computer Use MCP tools by default in desktop mode
+  // The desktop provides the permission UI and runtime guards
+  if (!next.CLAUDE_CODE_ENABLE_COMPUTER_USE) {
+    next.CLAUDE_CODE_ENABLE_COMPUTER_USE = '1'
+  }
+  // Enable Chrome/browser MCP tools by default in desktop mode
+  if (!next.CLAUDE_CODE_ENABLE_CFC) {
+    next.CLAUDE_CODE_ENABLE_CFC = '1'
+  }
+  // Allow ant users without monorepo to use computer use
+  if (!next.ALLOW_ANT_COMPUTER_USE_MCP) {
+    next.ALLOW_ANT_COMPUTER_USE_MCP = '1'
+  }
   if (proxy?.enabled && proxy.url) {
     next.HTTP_PROXY = proxy.url
     next.HTTPS_PROXY = proxy.url

@@ -136,6 +136,8 @@ Claude Quickstarts仓库包含以下参考实现模式：
 
 ### 已验证完成项
 - [x] 所有4个npm stubs全部实现（chrome-mcp, computer-use-mcp, computer-use-input, computer-use-swift）
+- [x] **@ant/computer-use-swift完整实现**：screencapture截图、system_profiler显示器、AppleScript应用管理、TCC权限检测
+- [x] **Desktop自动启用Computer Use**：`applyDesktopRuntimeEnv`注入`CLAUDE_CODE_ENABLE_COMPUTER_USE=1`和`CLAUDE_CODE_ENABLE_CFC=1`
 - [x] 全部65个IPC channel都有handler实现
 - [x] 所有依赖已安装（playwright, nut-js, screenshot-desktop, clipboardy）
 - [x] quickstarts中的Agent/MCP/Browser/Computer Use模式全部由CLI SDK层提供
