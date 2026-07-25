@@ -3733,14 +3733,8 @@ button:focus-visible {
   border-bottom: none;
 }
 
-/* Keep app branding visible but compact */
+.rail-header .app-kicker,
 .rail-header h1 {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.rail-header .app-kicker {
   display: none;
 }
 
@@ -3761,56 +3755,9 @@ button:focus-visible {
   background: var(--sidebar-hover);
 }
 
-/* Primary nav: ChatGPT-style compact sidebar items */
+/* Hide primary nav (Chat/Agents/Teams/Tasks/MCP/Skills buttons) */
 .primary-nav {
-  display: grid;
-  gap: 2px;
-  padding: 4px 8px;
-  border-bottom: none;
-}
-
-.primary-nav button {
-  min-height: 34px;
-  padding: 0 10px;
-  border-radius: 8px;
-  gap: 12px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text);
-}
-
-.primary-nav button:hover {
-  background: var(--sidebar-hover);
-}
-
-.primary-nav button.active {
-  background: var(--sidebar-active);
-  color: var(--text);
-  font-weight: 600;
-}
-
-.primary-nav button .glyph {
-  width: 18px;
-  height: 18px;
-  color: var(--muted);
-  flex-shrink: 0;
-}
-
-.primary-nav button.active .glyph {
-  color: var(--text);
-}
-
-.primary-nav button .nav-shortcut {
-  display: none;
-}
-
-.primary-nav button .nav-badge {
-  margin-left: auto;
-  background: var(--accent);
-  color: #fff;
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 8px;
+  display: none !important;
 }
 
 /* Session list section */
@@ -4452,65 +4399,11 @@ button:focus-visible {
   display: none;
 }
 
-/* Rail header */
-.rail-header {
-  padding: 12px 12px 4px;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 8px;
-}
-
+/* Rail header no longer has the old title div */
 .rail-header > div:first-child {
-  display: block;
-  padding: 4px 4px 0;
-}
-
-/* Divider between primary nav and session list */
-.primary-nav {
-  border-bottom: 1px solid var(--hairline);
-  padding-bottom: 8px;
-  margin-bottom: 4px;
-}
-
-/* Session group labels styled like nav section headers */
-.session-group-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--muted);
-  padding: 10px 10px 4px;
-}
-
-/* Remove the redundant Sessions collapse toggle */
-.rail-sessions > .rail-section-toggle {
   display: none;
 }
 
-.rail-sessions {
-  overflow: hidden;
-}
-
-.session-list {
-  padding: 0 8px 8px;
-}
-
-/* Chat icon for chat nav item */
-.primary-nav button:first-child .glyph {
-  /* keep default */
-}
-
-/* Rail footer settings button styled consistently */
-.rail-footer button {
-  width: 100%;
-  justify-content: flex-start;
-  border-radius: 8px;
-}
-
-.rail-footer button .glyph {
-  width: 18px;
-  height: 18px;
-  color: var(--muted);
-}
-
-.rail-footer button.active .glyph {
-  color: var(--text);
+.rail-header {
+  padding: 12px 12px 8px;
 }
