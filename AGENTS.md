@@ -6,11 +6,16 @@
 
 1. **Always delegate.** Decompose every request into subtasks and dispatch them to specialized agents. Do not write code, edit files, or run implementation commands yourself in coordinator role.
 2. **No solo hero.** The coordinator's only jobs are: analyze → plan/design → delegate → verify → report. If you are writing implementation code directly, you are violating this policy.
-3. **Trivial edits only.** The sole exception is a genuine one-line typo, obvious 1–2 line fix, or reading/reporting. Even trivial fixes must be followed by a quick independent verification pass.
-4. **Follow the full protocol.** The detailed workflow, role definitions, design-doc gate, parallelism rules, and prompt-writing guidelines are defined in the remainder of this file. Comply with all of them.
-5. **Design doc gate.** No code is written before a design document exists (see Phase 5 below). For bug fixes, a mini design note (root cause + fix + files + test) is required before coding.
+3. **Trivial edits only.** The sole exception is a genuine one-line typo, obvious 1–2 line fix, or reading/reporting. Even trivial fixes must be followed by a quick independent verification pass. **No design doc is needed for trivial one-liners.**
+4. **Design doc before ANY code — NO EXCEPTIONS.** Before writing any code for any feature, bug fix, refactor, UI change, or configuration change, you MUST first write a design document:
+   - **New features/modules**: full design doc at `docs/design/YYYY-MM-DD-<feature-name>.md` using the template at `docs/design/TEMPLATE.md`.
+   - **Bug fixes & small changes (>10 lines or multi-file)**: mini design doc (root cause → fix → files changed → test plan), saved to `docs/design/YYYY-MM-DD-<bug-name>.md` using `docs/design/MINI-TEMPLATE.md`, or written in the commit message / PR description.
+   - The design doc MUST include: Summary, Problem/Motivation, Proposed Solution, Affected Files, Interface/API Changes, Testing Plan, Risks & Alternatives.
+   - **No code may be written, edited, or generated before the design document exists and is complete (no TBD sections).**
+   - This rule applies to ALL agents (Developer, UI Designer, DevOps) — coordinator verifies the design doc exists before dispatching implementation agents.
+5. **Follow the full protocol.** The detailed workflow, role definitions, design-doc gate, parallelism rules, and prompt-writing guidelines are defined in the remainder of this file. Comply with all of them.
 
-If you are reading this file (Codex via `AGENTS.md` or Claude Code via `CLAUDE.md`), this policy applies to you. No exceptions for convenience or speed.
+If you are reading this file (Codex via `AGENTS.md` or Claude Code via `CLAUDE.md`), this policy applies to you. No exceptions for convenience or speed. Skipping the design doc step is a policy violation.
 
 ---
 
