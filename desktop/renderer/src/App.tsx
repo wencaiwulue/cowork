@@ -10926,6 +10926,11 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                   <Icon name="play" />
                   <strong>No project scheduled tasks</strong>
                   <span>Add a cron schedule and prompt to write this workspace's .claude/scheduled_tasks.json.</span>
+                  <div className="empty-actions">
+                    <button className="tool-button" onClick={() => startNewProjectScheduledTaskDraft()} disabled={!activeSession || isLoading('session')}>
+                      <Icon name="plus" />Add task
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -11033,6 +11038,11 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
               <Icon name="play" />
               <strong>No global scheduled tasks</strong>
               <span>Add a task name, cron schedule, and prompt to create a global Claude Code schedule.</span>
+              <div className="empty-actions">
+                <button className="tool-button" onClick={() => startNewScheduledTaskDraft()} disabled={isLoading('session')}>
+                  <Icon name="plus" />Add task
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -12222,6 +12232,11 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                               <>
                                 <strong>No agents loaded</strong>
                                 <span>Refresh to load built-in and user agents.</span>
+                                <div className="empty-actions">
+                                  <button className="tool-button" onClick={handleAgentsRefreshClick} disabled={isLoading('agents')}>
+                                    <Icon name="refresh" />Refresh agents
+                                  </button>
+                                </div>
                               </>
                             )}
                           </div>
@@ -12986,7 +13001,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                             <div className="team-member-empty workarea-empty">
                               <Icon name="users" />
                               <strong>No teammates reported</strong>
-                              <span>Spawn a teammate or refresh Teams after agents join this team.</span>
+                              <span>Select or create a team first, then spawn a teammate.</span>
                             </div>
                           )}
                         </div>
@@ -13008,6 +13023,11 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                         <Icon name="users" />
                         <strong>No teams found</strong>
                         <span>Create a team in this workspace to manage teammates from the Teams page.</span>
+                        <div className="empty-actions">
+                          <button className="tool-button" onClick={startNewTeamDraft} disabled={!activeSession || isLoading('session')}>
+                            <Icon name="plus" />Create team
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
