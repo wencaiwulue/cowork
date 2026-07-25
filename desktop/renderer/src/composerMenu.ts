@@ -17,7 +17,9 @@ export function composerTrigger(
 ): ComposerTrigger | undefined {
   const boundedCursor = Math.max(0, Math.min(cursor, input.length))
   const before = input.slice(0, boundedCursor)
-  const match = /(?:^|\s)([@/])([^\s@/]*)$/.exec(before)
+  // Allow `/` in mention queries (for @skill:name, @mcp:name, @filepath/path)
+  // but still treat `/` as a trigger when preceded by start or whitespace.
+  const match = /(?:^|\s)([@/])([^\s@]*)$/.exec(before)
   if (!match || match.index === undefined) return undefined
   const triggerChar = match[1] as '@' | '/'
   const leadingSpace = match[0].startsWith(' ') ? 1 : 0

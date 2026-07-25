@@ -2967,19 +2967,19 @@ button:focus-visible {
 
 .resource-row {
   padding: 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--hairline);
   border-radius: 8px;
   cursor: pointer;
   transition: background 0.15s;
 }
 
 .resource-row:hover {
-  background: var(--bg-hover);
+  background: var(--surface-3);
 }
 
 .resource-row.selected {
   border-color: var(--accent);
-  background: var(--bg-selected);
+  background: var(--surface-3);
 }
 
 .resource-row strong {
@@ -2990,7 +2990,7 @@ button:focus-visible {
 
 .resource-row small {
   display: block;
-  color: var(--text-muted);
+  color: var(--muted);
   font-size: 11px;
   margin-bottom: 4px;
 }
@@ -2999,7 +2999,7 @@ button:focus-visible {
   display: block;
   font-size: 11px;
   padding: 2px 6px;
-  background: var(--bg-subtle);
+  background: var(--surface-2);
   border-radius: 4px;
   margin-top: 4px;
   overflow-x: auto;
@@ -3009,19 +3009,19 @@ button:focus-visible {
 .mini-section {
   margin-top: 20px;
   padding-top: 16px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--hairline);
 }
 
 .mini-section h4 {
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--text-muted);
+  color: var(--muted);
   margin: 0 0 12px 0;
 }
 
 .health-output {
-  background: var(--bg-subtle);
+  background: var(--surface-2);
   padding: 12px;
   border-radius: 6px;
   font-size: 12px;
@@ -3045,7 +3045,7 @@ button:focus-visible {
 .filter-tabs {
   display: flex;
   gap: 4px;
-  background: var(--bg-subtle);
+  background: var(--surface-2);
   padding: 4px;
   border-radius: 8px;
 }
@@ -3057,18 +3057,18 @@ button:focus-visible {
   border-radius: 6px;
   font-size: 12px;
   cursor: pointer;
-  color: var(--text-muted);
+  color: var(--muted);
   transition: all 0.15s;
 }
 
 .filter-tabs button:hover {
   color: var(--text);
-  background: var(--bg-hover);
+  background: var(--surface-3);
 }
 
 .filter-tabs button.active {
   background: var(--accent);
-  color: var(--accent-contrast);
+  color: #fff;
 }
 
 .filter-tabs button:disabled {
@@ -3085,10 +3085,10 @@ button:focus-visible {
 }
 
 .activity-timeline {
-  border: 1px solid var(--border);
+  border: 1px solid var(--hairline);
   border-radius: 8px;
   overflow-y: auto;
-  background: var(--bg-subtle);
+  background: var(--surface-2);
 }
 
 .activity-item {
@@ -3099,7 +3099,7 @@ button:focus-visible {
   width: 100%;
   padding: 6px 10px;
   border: none;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--hairline);
   background: transparent;
   text-align: left;
   cursor: pointer;
@@ -3108,11 +3108,11 @@ button:focus-visible {
 }
 
 .activity-item:hover {
-  background: var(--bg-hover);
+  background: var(--surface-3);
 }
 
 .activity-item.selected {
-  background: var(--bg-selected);
+  background: var(--surface-3);
   border-left: 3px solid var(--accent);
 }
 
@@ -3121,7 +3121,7 @@ button:focus-visible {
 }
 
 .activity-time {
-  color: var(--text-muted);
+  color: var(--muted);
   font-variant-numeric: tabular-nums;
   font-size: 11px;
   white-space: nowrap;
@@ -3130,7 +3130,7 @@ button:focus-visible {
 .activity-type {
   font-family: var(--font-mono);
   font-size: 10px;
-  color: var(--text-muted);
+  color: var(--muted);
   padding: 1px 6px;
   background: var(--bg);
   border-radius: 4px;
@@ -3151,7 +3151,7 @@ button:focus-visible {
 }
 
 .activity-detail {
-  border: 1px solid var(--border);
+  border: 1px solid var(--hairline);
   border-radius: 8px;
   overflow-y: auto;
   background: var(--bg);
@@ -3164,11 +3164,11 @@ button:focus-visible {
   align-items: center;
   margin-bottom: 16px;
   padding-bottom: 12px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--hairline);
 }
 
 .activity-detail-header small {
-  color: var(--text-muted);
+  color: var(--muted);
 }
 
 .activity-meta {
@@ -3185,7 +3185,7 @@ button:focus-visible {
 }
 
 .activity-meta small {
-  color: var(--text-muted);
+  color: var(--muted);
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -3194,7 +3194,7 @@ button:focus-visible {
 .activity-meta code {
   font-size: 11px;
   padding: 4px 8px;
-  background: var(--bg-subtle);
+  background: var(--surface-2);
   border-radius: 4px;
   overflow-x: auto;
 }
@@ -3202,18 +3202,18 @@ button:focus-visible {
 .activity-parsed {
   margin-bottom: 16px;
   padding: 12px;
-  background: var(--bg-subtle);
+  background: var(--surface-2);
   border-radius: 6px;
 }
 
 .activity-parsed.thinking {
-  background: color-mix(in srgb, #ffd700 8%, var(--bg-subtle));
+  background: color-mix(in srgb, #ffd700 8%, var(--surface-2));
   border-left: 3px solid #ffd700;
 }
 
 .activity-parsed small {
   display: block;
-  color: var(--text-muted);
+  color: var(--muted);
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -3236,7 +3236,7 @@ button:focus-visible {
 
 .activity-raw small {
   display: block;
-  color: var(--text-muted);
+  color: var(--muted);
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -3268,7 +3268,7 @@ button:focus-visible {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--muted);
   cursor: pointer;
   user-select: none;
 }
@@ -3304,7 +3304,7 @@ button:focus-visible {
   top: 4px;
   right: 4px;
   background: var(--accent);
-  color: var(--accent-contrast);
+  color: #fff;
   font-size: 10px;
   font-weight: 600;
   min-width: 16px;
@@ -3328,7 +3328,7 @@ button:focus-visible {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--muted);
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--hairline);
 }
 
 .composer-menu-divider:first-child {
@@ -4206,13 +4206,20 @@ button:focus-visible {
    DARK THEME — Fixes for Agents/Teams/Tasks/MCP/Skills pages
    ========================================================================== */
 
-/* Define missing legacy CSS variables in both themes */
+/* Deprecated aliases — use canonical new-system variables instead.
+   --border → --hairline
+   --bg-subtle → --surface-2
+   --bg-hover → --surface-3
+   --bg-selected → --surface-3
+   --text-muted → --muted
+   --accent-contrast → #fff (constant)
+   Kept for one release cycle as a safety net; will be removed in a future cleanup. */
 :root {
-  --border: #d7d0c4;
-  --bg-subtle: #f0ede7;
-  --bg-hover: #eee9e1;
-  --bg-selected: #e8e2d8;
-  --text-muted: #70685d;
+  --border: var(--hairline);
+  --bg-subtle: var(--surface-2);
+  --bg-hover: var(--surface-3);
+  --bg-selected: var(--surface-3);
+  --text-muted: var(--muted);
   --accent-contrast: #fff;
 }
 [data-theme="dark"] {
@@ -5310,4 +5317,132 @@ button:focus-visible {
 }
 [data-theme="dark"] .question-option.selected {
   background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));
+}
+
+/* ---- P1-6: Multi-session streaming indicator ---- */
+.session-row.streaming {
+  box-shadow: inset 3px 0 0 0 var(--accent);
+  animation: session-streaming-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes session-streaming-pulse {
+  0%, 100% { background: transparent; }
+  50% { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+}
+
+[data-theme="dark"] .session-row.streaming {
+  box-shadow: inset 3px 0 0 0 var(--accent);
+  animation: session-streaming-pulse-dark 1.8s ease-in-out infinite;
+}
+
+@keyframes session-streaming-pulse-dark {
+  0%, 100% { background: transparent; }
+  50% { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+}
+
+/* ---- P1-10/P1-2: Error banner actions ---- */
+.dismissible-error {
+  flex-wrap: wrap;
+}
+
+.error-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.error-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid rgba(180, 71, 75, 0.3);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--red);
+  font-size: 11px;
+  cursor: pointer;
+}
+.error-retry:hover {
+  background: rgba(180, 71, 75, 0.1);
+}
+
+.error-details-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+.error-details-toggle:hover {
+  background: var(--surface-2);
+}
+.error-details-toggle:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.error-stack {
+  flex-basis: 100%;
+  margin-top: 6px;
+  padding: 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+}
+[data-theme="dark"] .error-stack {
+  background: rgba(255, 255, 255, 0.05);
+}
+[data-theme="dark"] .error-retry:hover {
+  background: rgba(180, 71, 75, 0.2);
+}
+[data-theme="dark"] .error-details-toggle:hover {
+  background: var(--surface-3);
+}
+
+/* ---- P1-12/P1-4: Session rename input ---- */
+.session-rename-input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+}
+
+/* ---- P1-5: Command palette group headers ---- */
+.command-palette-group-header {
+  padding: 6px 12px 2px;
+  margin-top: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  user-select: none;
+  cursor: default;
+}
+.command-palette-group-header:first-child {
+  margin-top: 0;
+}
+
+/* ---- P1-13: Empty state CTA buttons ---- */
+.workarea-empty .empty-actions {
+  margin-top: 10px;
 }
