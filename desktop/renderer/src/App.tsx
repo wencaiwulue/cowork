@@ -22,6 +22,7 @@ import {
   Clipboard,
   ExternalLink,
   FileText,
+  Flag,
   Folder,
   GitCompare,
   Globe,
@@ -436,6 +437,7 @@ type IconName =
   | 'code'
   | 'diff'
   | 'file'
+  | 'flag'
   | 'folder'
   | 'globe'
   | 'more'
@@ -479,6 +481,7 @@ const iconComponents: Record<IconName, LucideIcon> = {
   code: Braces,
   diff: GitCompare,
   file: FileText,
+  flag: Flag,
   folder: Folder,
   globe: Globe,
   more: MoreHorizontal,
@@ -1869,6 +1872,7 @@ export function App() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [composerMenuActiveIndex, setComposerMenuActiveIndex] = useState(0)
   const [activeSlashCommand, setActiveSlashCommand] = useState<{ name: string; label: string; icon: IconName } | null>(null)
+  const [activeGoal, setActiveGoal] = useState<{ id: string; text: string; createdAt: number } | null>(null)
   const [sessionCreateMenu, setSessionCreateMenu] = useState<SessionCreateMenuState>()
   const [sessionCreateMenuActiveIndex, setSessionCreateMenuActiveIndex] = useState(0)
   const sessionCreateMenuItemIds = [
@@ -3735,6 +3739,15 @@ export function App() {
         disabledReason: workspaceActionDisabledReason,
         value: '/plan',
       },
+      {
+        id: 'action:goal',
+        label: 'goal',
+        detail: 'Set a persistent goal to work toward across multiple turns',
+        icon: 'flag',
+        disabled: workspaceActionDisabled,
+        disabledReason: workspaceActionDisabledReason,
+        value: '/goal',
+      },
       { divider: true, label: 'Navigation' },
       {
         id: 'action:open-terminal',
@@ -4679,6 +4692,8 @@ export function App() {
         return 'Please add or update documentation for the current code. Include: function/class purpose, parameter descriptions, return values, usage examples where helpful, and any important notes about behavior or limitations. Follow existing documentation style.'
       case '/plan':
         return 'Please analyze the current codebase or requested change and create a step-by-step implementation plan. Break the work into small, verifiable steps. For each step, describe what will change, what files are affected, and how to verify it works. Present the plan before making changes.'
+      case '/goal':
+        return 'This sets a persistent goal. After I send this message, the goal described below will be active across all subsequent turns until I mark it complete or clear it. Always remember this goal and make concrete progress toward it every turn. The goal is:'
       case '/terminal':
         return ''
       case '/files':
@@ -4716,6 +4731,7 @@ export function App() {
       case '/refactor': return 'Refactor code for clarity and performance'
       case '/document': return 'Add or update documentation'
       case '/plan': return 'Create a step-by-step implementation plan'
+      case '/goal': return 'Set a persistent goal to work toward across turns'
       default: return ''
     }
   }
@@ -5121,13 +5137,30 @@ export function App() {
     const { target: resolvedTarget, cleanText, contextMentions } = resolveChatTargetFromInput(rawText)
     // Build enriched text with context mentions
     let text = cleanText
-    // Prepend slash command system prompt if active
+    // Handle /goal command specially: extract goal and set as persistent goal
+    let isGoalCommand = false
+    let goalText = ''
+    if (activeSlashCommand && activeSlashCommand.name === 'goal') {
+      goalText = cleanText.trim()
+      isGoalCommand = !!goalText
+      if (isGoalCommand) {
+        setActiveGoal({ id: `goal-${Date.now()}`, text: goalText, createdAt: Date.now() })
+        text = `${slashPrompt('/goal')} ${goalText}
+
+Acknowledge the goal and begin working toward it. I will check in on your progress.`
+      }
+    }
+    // Prepend slash command system prompt if active (non-goal commands)
     const slashCmd = activeSlashCommand
-    if (slashCmd) {
+    if (slashCmd && !isGoalCommand) {
       const cmdPrompt = slashPrompt('/' + slashCmd.name)
       if (cmdPrompt) {
         text = cmdPrompt + (text ? '\n\n' + text : '')
       }
+    }
+    // Prepend active goal context to every message while goal is set
+    if (!isGoalCommand && activeGoal) {
+      text = `[Active goal - work toward this objective across turns]:\n${activeGoal.text}\n\nMy message: ${text}`
     }
     if (contextMentions.length > 0) {
       const contextParts: string[] = []
@@ -11105,6 +11138,23 @@ export function App() {
               </div>
             )}
           </section>
+
+          {activeGoal && (
+            <div className="goal-bar" role="region" aria-label="Active goal">
+              <div className="goal-bar-content">
+                <Icon name="flag" />
+                <div className="goal-bar-text">
+                  <strong>Active Goal</strong>
+                  <span>{activeGoal.text.length > 200 ? activeGoal.text.slice(0, 200) + '…' : activeGoal.text}</span>
+                </div>
+              </div>
+              <div className="goal-bar-actions">
+                <button className="tool-button" onClick={() => setActiveGoal(null)} title="Clear goal">
+                  <Icon name="x" />Clear
+                </button>
+              </div>
+            </div>
+          )}
 
           {planApprovalPending && activeSession && !loadingLabel && (
             <div className="plan-approval-bar" role="region" aria-label="Plan approval">

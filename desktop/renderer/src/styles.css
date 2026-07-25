@@ -3685,3 +3685,72 @@ button:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Goal bar */
+.goal-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  background: linear-gradient(135deg, #fff3e0, #fef9e7);
+  border-top: 1px solid #ffe0b2;
+  border-bottom: 1px solid #ffe0b2;
+  flex-shrink: 0;
+}
+
+.goal-bar-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.goal-bar-content > svg {
+  width: 18px;
+  height: 18px;
+  color: #e65100;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.goal-bar-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.goal-bar-text strong {
+  font-size: 12px;
+  font-weight: 650;
+  color: #e65100;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.goal-bar-text span {
+  font-size: 13px;
+  color: #4e342e;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.goal-bar-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.goal-bar-actions .tool-button {
+  font-size: 12px;
+  padding: 5px 12px;
+  color: #bf360c;
+}
+
+.goal-bar-actions .tool-button:hover {
+  background: rgba(255, 112, 67, 0.12);
+}
