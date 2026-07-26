@@ -1824,6 +1824,7 @@ export function App() {
   const rpcMessageIdRef = useRef(0)
   const [planApprovalPending, setPlanApprovalPending] = useState(false)
   const [planContent, setPlanContent] = useState<string | null>(null)
+  const [resolvedPermissions, setResolvedPermissions] = useState<Record<string, 'allow' | 'deny'>>({})
   const lastCheckedMessageIdRef = useRef<string>('')
 
   function detectPlanApprovalPrompt(messages: Array<{ id: string; role: string; text: string; streaming?: boolean }>): void {
@@ -2824,29 +2825,6 @@ export function App() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [confirmRequest, loading])
-
-  useEffect(() => {
-    if (!pendingPermission) return
-    captureReturnFocus(permissionReturnFocusRef, permissionModalRef.current)
-    permissionAllowButtonRef.current?.focus()
-    function onKeyDown(event: KeyboardEvent): void {
-      trapModalFocus(event, permissionModalRef.current)
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        event.stopPropagation()
-        if (isLoading('session') || permissionResponding) return
-        void respondToPermission('deny')
-        return
-      }
-      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
-        event.preventDefault()
-        if (isLoading('session') || permissionResponding) return
-        void respondToPermission('allow')
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [pendingPermission?.requestId, loading, permissionResponding])
 
   useEffect(() => {
     if (!commandPaletteOpen) {
@@ -11221,14 +11199,14 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
     void updateSessionLayout(sessionId, { workspaceRatio: clampWorkspaceRatio(nextRatio) })
   }
 
-  async function respondToPermission(behavior: 'allow' | 'deny'): Promise<void> {
+  async function respondToPermission(behavior: 'allow' | 'deny', specificRequest?: NormalizedPermissionRequest): Promise<void> {
+    const request = specificRequest ?? pendingPermission
     if (
-      !pendingPermission ||
+      !request ||
       respondingPermissionId ||
       loading ||
       permissionActionPendingRef.current
     ) return
-    const request = pendingPermission
     permissionActionPendingRef.current = true
     setRespondingPermissionId(request.requestId)
     try {
@@ -11237,10 +11215,11 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
         request.requestId,
         createPermissionResponse(request, behavior),
       )
+      setResolvedPermissions(prev => ({ ...prev, [request.requestId]: behavior }))
       setPermissionQueue(prev =>
         prev.filter(item => item.requestId !== request.requestId),
       )
-      restoreFocus(permissionReturnFocusRef)
+      if (!specificRequest) restoreFocus(permissionReturnFocusRef)
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)
       setPermissionQueue(prev =>
@@ -11732,6 +11711,69 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                 </button>
               </div>
             )}
+            {permissionQueue.filter(p => p.toolName !== 'ExitPlanMode').map(perm => {
+              const resolved = resolvedPermissions[perm.requestId]
+              return (
+                <article key={"perm-" + perm.requestId} className="message message-tool permission-card-message">
+                  <div className="message-label">
+                    <span className="message-role">Permission request</span>
+                  </div>
+                  <div className={`permission-inline-card ${resolved || ''}`}>
+                    <div className="permission-inline-header">
+                      <Icon name="shield" width={16} height={16} />
+                      <strong>{perm.toolName}</strong>
+                      <span className="permission-inline-desc">{perm.description}</span>
+                    </div>
+                    {perm.blockedPath && (
+                      <div className="permission-inline-path">
+                        <Icon name="file" width={13} height={13} />
+                        <code>{perm.blockedPath}</code>
+                      </div>
+                    )}
+                    {perm.decisionReason && (
+                      <div className="permission-inline-reason">{perm.decisionReason}</div>
+                    )}
+                    {Object.keys(perm.input).length > 0 && (
+                      <details className="permission-inline-details">
+                        <summary>Tool input ({Object.keys(perm.input).length} fields)</summary>
+                        <pre>{JSON.stringify(perm.input, null, 2)}</pre>
+                      </details>
+                    )}
+                    {perm.error && <div className="inline-error">{perm.error}</div>}
+                    {resolved ? (
+                      <div className="permission-inline-resolved">
+                        <Icon name={resolved === 'allow' ? 'check' : 'x'} width={14} height={14} />
+                        <span>{resolved === 'allow' ? 'Allowed' : 'Denied'}</span>
+                      </div>
+                    ) : (
+                      <div className="permission-inline-actions">
+                        <button
+                          className="tool-button"
+                          onClick={() => handlePermissionCancelTurnClick()}
+                          disabled={isLoading('session') || permissionResponding}
+                        >
+                          <Icon name="square" width={14} height={14} />Cancel turn
+                        </button>
+                        <button
+                          className="tool-button"
+                          onClick={() => void respondToPermission('deny', perm)}
+                          disabled={isLoading('session') || permissionResponding}
+                        >
+                          <Icon name="x" width={14} height={14} />Deny
+                        </button>
+                        <button
+                          className="send-button permission-inline-allow"
+                          onClick={() => void respondToPermission('allow', perm)}
+                          disabled={isLoading('session') || permissionResponding}
+                        >
+                          <Icon name="check" width={14} height={14} />{permissionResponding && respondingPermissionId === perm.requestId ? 'Sending...' : 'Allow'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </article>
+              )
+            })}
           </section>
 
           {activeGoal && (
@@ -11954,10 +11996,23 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
               <button type="button" className="tool-button attach-button" onClick={handleAttachButtonClick} disabled={!activeSession || isLoading('session')} title="Attach image">
                 <Icon name="file" />
               </button>
-              <button className="send-button" onClick={handleComposerSendClick} disabled={!activeSession || turnBusy || (!input.trim() && composerAttachments.length === 0) || isLoading('session')}>
-                <Icon name="send" />
-                Send
-              </button>
+              {turnBusy ? (
+                <button
+                  className="tool-button composer-cancel-button"
+                  type="button"
+                  onClick={handleCancelTurnClick}
+                  title="Cancel current turn (Esc)"
+                  disabled={cancelActionPendingRef.current}
+                >
+                  <Icon name="square" />
+                  Cancel
+                </button>
+              ) : (
+                <button className="send-button" onClick={handleComposerSendClick} disabled={!activeSession || (!input.trim() && composerAttachments.length === 0) || isLoading('session')}>
+                  <Icon name="send" />
+                  Send
+                </button>
+              )}
             </div>
           </footer>
         </section>
@@ -13973,65 +14028,6 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
         </div>
       )}
 
-      {pendingPermission && pendingPermission.toolName !== 'ExitPlanMode' && (
-        <div
-          className="modal-backdrop"
-          onClick={event => {
-            if (event.target === event.currentTarget && !isLoading('session') && !permissionResponding) {
-              void respondToPermission('deny')
-            }
-          }}
-        >
-          <section ref={permissionModalRef} className="permission-modal" role="dialog" aria-modal="true" aria-labelledby="permission-title">
-            <div className="eyebrow">Permission request</div>
-            <h2 id="permission-title">{pendingPermission.toolName}</h2>
-            <p>{pendingPermission.description}</p>
-            {pendingPermission.blockedPath && (
-              <p className="permission-detail">Blocked path: {pendingPermission.blockedPath}</p>
-            )}
-            {pendingPermission.decisionReason && (
-              <p className="permission-detail">{pendingPermission.decisionReason}</p>
-            )}
-            {pendingPermission.agentContext && (
-              <p className="permission-detail">{pendingPermission.agentContext}</p>
-            )}
-            {pendingPermission.teamContext && (
-              <p className="permission-detail">{pendingPermission.teamContext}</p>
-            )}
-            <section className="permission-section" aria-label="Tool input">
-              <h3>Tool input</h3>
-              {renderPermissionInput(pendingPermission.input)}
-            </section>
-            {pendingPermission.permissionSuggestions?.length ? (
-              <section className="permission-section" aria-label="Permission suggestions">
-                <h3>Permission suggestions</h3>
-                <pre>{rawSummary(pendingPermission.permissionSuggestions)}</pre>
-              </section>
-            ) : null}
-            <section className="permission-section" aria-label="Raw request">
-              <h3>Raw request</h3>
-              <pre>{rawSummary(pendingPermission.raw)}</pre>
-            </section>
-            {permissionResponding && (
-              <div className="permission-status" role="status">
-                Sending permission response...
-              </div>
-            )}
-            {pendingPermission.error && <div className="inline-error">{pendingPermission.error}</div>}
-            <div className="modal-actions">
-              <button className="tool-button" onClick={handlePermissionCancelTurnClick} disabled={!cancelAvailable || isLoading('session') || permissionResponding}>
-                <Icon name="square" />Cancel turn
-              </button>
-              <button ref={permissionDenyButtonRef} className="tool-button" onClick={() => handlePermissionResponseClick('deny')} disabled={isLoading('session') || permissionResponding}>
-                <Icon name="x" />Deny
-              </button>
-              <button ref={permissionAllowButtonRef} className="send-button" onClick={() => handlePermissionResponseClick('allow')} disabled={isLoading('session') || permissionResponding}>
-                <Icon name="check" />{permissionResponding ? 'Sending...' : 'Allow'}
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
     </main>
   )
 }

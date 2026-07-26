@@ -5515,3 +5515,148 @@ button:focus-visible {
   border-color: #5a4a20;
   color: #c4a860;
 }
+
+/* Inline permission card in chat */
+.permission-card-message {
+  border-left: 3px solid var(--accent, #6366f1);
+}
+
+.permission-inline-card {
+  background: var(--bg-secondary, #f5f5f5);
+  border: 1px solid var(--border, #e0e0e0);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.permission-inline-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.permission-inline-header strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.permission-inline-desc {
+  color: var(--text-secondary, #666);
+  font-size: 13px;
+  flex: 1;
+  min-width: 100px;
+}
+
+.permission-inline-path {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary, #666);
+}
+
+.permission-inline-path code {
+  background: var(--bg-tertiary, #eee);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.permission-inline-reason {
+  font-size: 12px;
+  color: var(--text-secondary, #888);
+  font-style: italic;
+}
+
+.permission-inline-details {
+  font-size: 12px;
+}
+
+.permission-inline-details summary {
+  cursor: pointer;
+  color: var(--text-secondary, #666);
+  font-size: 12px;
+  user-select: none;
+}
+
+.permission-inline-details pre {
+  margin: 6px 0 0;
+  padding: 8px;
+  background: var(--bg-tertiary, #eee);
+  border-radius: 6px;
+  font-size: 11px;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.permission-inline-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+
+.permission-inline-allow {
+  padding: 6px 16px;
+}
+
+.permission-inline-resolved {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary, #666);
+  justify-content: flex-end;
+}
+
+.permission-inline-card.allow .permission-inline-resolved {
+  color: #22c55e;
+}
+
+.permission-inline-card.deny .permission-inline-resolved {
+  color: #ef4444;
+}
+
+[data-theme="dark"] .permission-inline-card {
+  background: #1e1e1e;
+  border-color: #333;
+}
+
+[data-theme="dark"] .permission-inline-path code {
+  background: #2a2a2a;
+}
+
+[data-theme="dark"] .permission-inline-details pre {
+  background: #2a2a2a;
+}
+
+/* Composer cancel button (replaces Send while streaming) */
+.composer-cancel-button {
+  gap: 6px;
+  color: #c44040;
+  border-color: rgba(196, 64, 64, 0.35);
+  background: #fef0f0;
+}
+
+.composer-cancel-button:hover:not(:disabled) {
+  background: #fde0e0;
+  border-color: rgba(196, 64, 64, 0.5);
+}
+
+[data-theme="dark"] .composer-cancel-button {
+  color: #e88080;
+  border-color: rgba(232, 128, 128, 0.3);
+  background: #3a2020;
+}
+
+[data-theme="dark"] .composer-cancel-button:hover:not(:disabled) {
+  background: #4a2828;
+}

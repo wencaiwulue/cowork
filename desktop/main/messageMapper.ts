@@ -80,6 +80,34 @@ function extractQuestion(value: unknown): DesktopQuestion | undefined {
 }
 
 
+
+function extractUserText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (!value || typeof value !== 'object') return ''
+
+  if ('text' in value && typeof (value as { text?: unknown }).text === 'string') {
+    return (value as { text: string }).text
+  }
+
+  if ('content' in value) {
+    const content = (value as { content?: unknown }).content
+    if (typeof content === 'string') return content
+    if (Array.isArray(content)) {
+      const parts: string[] = []
+      for (const block of content) {
+        if (!block || typeof block !== 'object') continue
+        const b = block as Record<string, unknown>
+        if (b.type === 'text' && typeof b.text === 'string') {
+          parts.push(b.text)
+        }
+      }
+      return parts.join('\n')
+    }
+  }
+
+  return ''
+}
+
 const INTERRUPT_MESSAGE = '[Request interrupted by user]'
 const INTERRUPT_MESSAGE_FOR_TOOL_USE = '[Request interrupted by user for tool use]'
 const LOCAL_COMMAND_CAVEAT_TAG_OPEN = '<local-command-caveat>'
@@ -232,8 +260,13 @@ export function toDesktopMessages(raw: unknown): DesktopMessage[] {
   const id = messageId(message)
 
   if (message.type === 'user') {
+    // Skip meta (synthetic/system) messages
+    if ('isMeta' in message && (message as { isMeta?: unknown }).isMeta) return []
+    // Skip visible-in-transcript-only messages (they're internal)
+    if ('isVisibleInTranscriptOnly' in message && (message as { isVisibleInTranscriptOnly?: unknown }).isVisibleInTranscriptOnly) return []
     if (containsToolResult(message.message)) return []
-    const rawText = extractText(message.message)
+    // Extract text from text content blocks only
+    const rawText = extractUserText(message.message)
     const classified = classifyUserMessage(rawText)
     if (classified.skip || !classified.text) return []
     return [{
