@@ -1,0 +1,6 @@
+{
+  "updatePolicy": "manual",
+  "reason": "This local desktop distribution does not yet have an auto-update service. Production releases must publish signed installers and release notes through the approved distribution channel.",
+  "releaseNotesRequired": true,
+  "rollbackRequired": true
+}

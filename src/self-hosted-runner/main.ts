@@ -1,0 +1,5 @@
+export async function main(): Promise<void> {}
+
+export async function selfHostedRunnerMain(
+  _args: string[] = [],
+): Promise<void> {}
