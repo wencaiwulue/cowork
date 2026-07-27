@@ -953,12 +953,32 @@ button[data-tooltip]:disabled::after {
   text-decoration: underline;
 }
 
-.message-copy-button {
+.message-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
   opacity: 0;
+  transition: opacity 120ms ease;
 }
 
-.message:hover .message-copy-button,
-.message:focus-within .message-copy-button,
+.message:hover .message-actions,
+.message:focus-within .message-actions,
+.message-actions:has(.message-copy-button[aria-label^="Copied"]) {
+  opacity: 1;
+}
+
+.message-actions .tool-button.icon-only {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+}
+
+.message-actions .tool-button.icon-only svg {
+  width: 14px;
+  height: 14px;
+}
+
 .message-copy-button[aria-label^="Copied"] {
   opacity: 1;
 }

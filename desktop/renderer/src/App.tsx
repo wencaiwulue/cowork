@@ -5190,6 +5190,23 @@ export function App() {
     autoResizeComposer()
   }
 
+  function handleEditMessageDraft(message: DesktopMessage): void {
+    if (message.role !== 'user' || !message.text.trim()) return
+    const draftText = message.text
+    composerHistoryIndexRef.current = 0
+    composerDraftBackupRef.current = ''
+    setInput(draftText)
+    setComposerCursor(draftText.length)
+    setConversationNotice({ kind: 'info', text: 'Loaded message into composer for editing.' })
+    requestAnimationFrame(() => {
+      const textarea = composerTextareaRef.current
+      if (!textarea) return
+      textarea.focus()
+      textarea.setSelectionRange(draftText.length, draftText.length)
+      autoResizeComposer()
+    })
+  }
+
   function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>): void {
     if (currentComposerTrigger && composerMenuItems.length && (event.key === 'Enter' || event.key === 'Tab')) {
       event.preventDefault()
@@ -11644,26 +11661,40 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                 <article key={message.id} className={messageClass(message)}>
                   <div className="message-label">
                     <span className="message-role">{messageRoleLabel(message.role)}</span>
-                    {typeof message.timestamp === 'number' && (
-                      <time className="message-time" dateTime={new Date(message.timestamp).toISOString()}>
-                        {formatTime(message.timestamp)}
-                      </time>
-                    )}
                     {messageStatusLabel(message) && (
                       <span className="message-stream-label">
                         {messageStatusLabel(message)}
                       </span>
                     )}
-                    <button
-                      className="tool-button icon-only message-copy-button"
-                      type="button"
-                      onClick={() => void copyText(copyTarget, messageText(message))}
-                      title={copied ? 'Copied' : 'Copy message'}
-                      aria-label={copied ? 'Copied message' : 'Copy message'}
-                      data-tooltip={copied ? 'Copied' : 'Copy message'}
-                    >
-                      <Icon name={copied ? 'check' : 'clipboard'} />
-                    </button>
+                    <div className="message-actions" aria-label="Message actions">
+                      {typeof message.timestamp === 'number' && (
+                        <time className="message-time" dateTime={new Date(message.timestamp).toISOString()}>
+                          {formatTime(message.timestamp)}
+                        </time>
+                      )}
+                      <button
+                        className="tool-button icon-only message-copy-button"
+                        type="button"
+                        onClick={() => void copyText(copyTarget, messageText(message))}
+                        title={copied ? 'Copied' : 'Copy message'}
+                        aria-label={copied ? 'Copied message' : 'Copy message'}
+                        data-tooltip={copied ? 'Copied' : 'Copy message'}
+                      >
+                        <Icon name={copied ? 'check' : 'clipboard'} />
+                      </button>
+                      {message.role === 'user' && message.text.trim() && (
+                        <button
+                          className="tool-button icon-only message-edit-button"
+                          type="button"
+                          onClick={() => handleEditMessageDraft(message)}
+                          title="Edit message"
+                          aria-label="Edit message"
+                          data-tooltip="Edit message"
+                        >
+                          <Icon name="pencil" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   {message.attachments && message.attachments.length > 0 && (
                     <div className="message-attachments">
