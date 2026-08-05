@@ -6,13 +6,13 @@ import { mkdtemp } from 'node:fs/promises'
 import { afterEach, describe, expect, it } from 'vitest'
 import { getWorkflowCommands } from '../../src/tools/WorkflowTool/createWorkflowCommand'
 
-const originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR
+const originalClaudeConfigDir = process.env.KODE_CONFIG_DIR
 
 afterEach(() => {
   if (originalClaudeConfigDir === undefined) {
-    delete process.env.CLAUDE_CONFIG_DIR
+    delete process.env.KODE_CONFIG_DIR
   } else {
-    process.env.CLAUDE_CONFIG_DIR = originalClaudeConfigDir
+    process.env.KODE_CONFIG_DIR = originalClaudeConfigDir
   }
 })
 
@@ -28,15 +28,15 @@ describe('workflow commands', () => {
     const root = await mkdtemp(join(tmpdir(), 'workflow-commands-'))
     const home = join(root, 'home')
     const cwd = join(root, 'project')
-    process.env.CLAUDE_CONFIG_DIR = home
+    process.env.KODE_CONFIG_DIR = home
     await mkdir(join(home, 'workflows'), { recursive: true })
-    await mkdir(join(cwd, '.claude/workflows/review'), { recursive: true })
+    await mkdir(join(cwd, '.kode/workflows/review'), { recursive: true })
     await writeFile(
       join(home, 'workflows/triage.md'),
       '---\ndescription: Triage issues\nargument-hint: "[ticket]"\nallowed-tools: Read, Grep\n---\nTriage $ARGUMENTS.\n',
     )
     await writeFile(
-      join(cwd, '.claude/workflows/review/security.md'),
+      join(cwd, '.kode/workflows/review/security.md'),
       '---\narguments: target\n---\n# Security workflow\n\nReview $target for security regressions.\n',
     )
 
@@ -83,11 +83,11 @@ describe('workflow commands', () => {
     const root = await mkdtemp(join(tmpdir(), 'workflow-commands-'))
     const home = join(root, 'home')
     const cwd = join(root, 'project')
-    process.env.CLAUDE_CONFIG_DIR = home
+    process.env.KODE_CONFIG_DIR = home
     await mkdir(join(home, 'workflows'), { recursive: true })
-    await mkdir(join(cwd, '.claude/workflows'), { recursive: true })
+    await mkdir(join(cwd, '.kode/workflows'), { recursive: true })
     await writeFile(join(home, 'workflows/review.md'), '# User review\n\nUse user workflow.\n')
-    await writeFile(join(cwd, '.claude/workflows/review.md'), '# Project review\n\nUse project workflow.\n')
+    await writeFile(join(cwd, '.kode/workflows/review.md'), '# Project review\n\nUse project workflow.\n')
 
     const commands = await getWorkflowCommands(cwd)
 
@@ -108,12 +108,12 @@ describe('workflow commands', () => {
     const root = await mkdtemp(join(tmpdir(), 'workflow-commands-'))
     const home = join(root, 'home')
     const cwd = join(root, 'project')
-    process.env.CLAUDE_CONFIG_DIR = home
-    await mkdir(join(cwd, '.claude/workflows/bad group'), { recursive: true })
-    await mkdir(join(cwd, '.claude/workflows/good'), { recursive: true })
-    await writeFile(join(cwd, '.claude/workflows/bad group/name.md'), '# Bad\n')
-    await writeFile(join(cwd, '.claude/workflows/good/bad:name.md'), '# Bad\n')
-    await writeFile(join(cwd, '.claude/workflows/good/name.md'), '# Good\n')
+    process.env.KODE_CONFIG_DIR = home
+    await mkdir(join(cwd, '.kode/workflows/bad group'), { recursive: true })
+    await mkdir(join(cwd, '.kode/workflows/good'), { recursive: true })
+    await writeFile(join(cwd, '.kode/workflows/bad group/name.md'), '# Bad\n')
+    await writeFile(join(cwd, '.kode/workflows/good/bad:name.md'), '# Bad\n')
+    await writeFile(join(cwd, '.kode/workflows/good/name.md'), '# Good\n')
 
     const commands = await getWorkflowCommands(cwd)
 
@@ -124,10 +124,10 @@ describe('workflow commands', () => {
     const root = await mkdtemp(join(tmpdir(), 'workflow-commands-'))
     const home = join(root, 'home')
     const cwd = join(root, 'project')
-    process.env.CLAUDE_CONFIG_DIR = home
-    await mkdir(join(cwd, '.claude/workflows'), { recursive: true })
+    process.env.KODE_CONFIG_DIR = home
+    await mkdir(join(cwd, '.kode/workflows'), { recursive: true })
     await writeFile(
-      join(cwd, '.claude/workflows/recover.md'),
+      join(cwd, '.kode/workflows/recover.md'),
       '---\ndescription: [broken\n---\n# Recover\n\nRun recovery steps.\n',
     )
 

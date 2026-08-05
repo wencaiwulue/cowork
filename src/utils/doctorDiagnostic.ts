@@ -33,7 +33,7 @@ import {
 import { getPlatform } from './platform.js'
 import { getRipgrepStatus } from './ripgrep.js'
 import { SandboxManager } from './sandbox/sandbox-adapter.js'
-import { getManagedFilePath } from './settings/managedPath.js'
+import { getKodeManagedFilePath } from './settings/managedPath.js'
 import { CUSTOMIZATION_SURFACES } from './settings/types.js'
 import {
   findClaudeAlias,
@@ -209,7 +209,7 @@ async function detectMultipleInstallations(): Promise<
   const installations: Array<{ type: string; path: string }> = []
 
   // Check for local installation
-  const localPath = join(homedir(), '.claude', 'local')
+  const localPath = join(homedir(), '.kode', 'local')
   if (await localInstallationExists()) {
     installations.push({ type: 'npm-local', path: localPath })
   }
@@ -327,7 +327,7 @@ async function detectConfigurationIssues(
   // install-path check, and it's useful to see during dev testing.
   try {
     const raw = await readFile(
-      join(getManagedFilePath(), 'managed-settings.json'),
+      join(getKodeManagedFilePath(), 'managed-settings.json'),
       'utf-8',
     )
     const parsed: unknown = jsonParse(raw)
@@ -469,13 +469,13 @@ async function detectConfigurationIssues(
         // Alias exists but points to invalid target
         warnings.push({
           issue: 'Local installation not accessible',
-          fix: `Alias exists but points to invalid target: ${existingAlias}. Update alias: alias claude="~/.claude/local/claude"`,
+          fix: `Alias exists but points to invalid target: ${existingAlias}. Update alias: alias claude="~/.kode/local/claude"`,
         })
       } else {
         // No alias exists and not in PATH
         warnings.push({
           issue: 'Local installation not accessible',
-          fix: 'Create alias: alias claude="~/.claude/local/claude"',
+          fix: 'Create alias: alias claude="~/.kode/local/claude"',
         })
       }
     }

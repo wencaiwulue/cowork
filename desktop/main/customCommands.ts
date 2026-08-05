@@ -12,9 +12,9 @@ export async function listCustomCommands(
   home = claudeHomeDir(),
 ): Promise<CustomCommandInfo[]> {
   const [project, user, projectWorkflows, userWorkflows] = await Promise.all([
-    listCommandsFromRoot('project', undefined, cwd, join(cwd, '.claude', 'commands')),
+    listCommandsFromRoot('project', undefined, cwd, join(cwd, '.kode', 'commands')),
     listCommandsFromRoot('user', undefined, home, join(home, 'commands')),
-    listCommandsFromRoot('project', 'workflow', cwd, join(cwd, '.claude', 'workflows')),
+    listCommandsFromRoot('project', 'workflow', cwd, join(cwd, '.kode', 'workflows')),
     listCommandsFromRoot('user', 'workflow', home, join(home, 'workflows')),
   ])
   return [...project, ...user, ...projectWorkflows, ...userWorkflows]

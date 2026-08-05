@@ -36,11 +36,11 @@ const FIELD_RANGES = [
 ]
 
 function cronFilePath(cwd: string): string {
-  return join(cwd, '.claude', 'scheduled_tasks.json')
+  return join(cwd, '.kode', 'scheduled_tasks.json')
 }
 
 function pausedCronFilePath(cwd: string): string {
-  return join(cwd, '.claude', 'scheduled_tasks.paused.json')
+  return join(cwd, '.kode', 'scheduled_tasks.paused.json')
 }
 
 function expandField(field: string, min: number, max: number): number[] | null {
@@ -204,7 +204,7 @@ async function writeTaskRecords(
   tasks: CronTaskRecord[],
   pathForCwd = cronFilePath(cwd),
 ): Promise<void> {
-  await mkdir(join(cwd, '.claude'), { recursive: true })
+  await mkdir(join(cwd, '.kode'), { recursive: true })
   const path = await assertWorkspaceFileTarget(cwd, pathForCwd, { forWrite: true })
   await writeFile(path, `${JSON.stringify({ tasks }, null, 2)}\n`, 'utf8')
 }

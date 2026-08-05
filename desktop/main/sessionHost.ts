@@ -335,7 +335,7 @@ function sanitizeProjectPath(name: string): string {
 }
 
 function sessionTranscriptExists(sessionId: string, cwd: string): boolean {
-  const configHome = process.env.CLAUDE_CONFIG_HOME || join(homedir(), '.claude')
+  const configHome = process.env.CLAUDE_CONFIG_HOME || join(homedir(), '.kode')
   const projectDir = join(configHome, 'projects', sanitizeProjectPath(cwd))
   const sessionFile = join(projectDir, `${sessionId}.jsonl`)
   try {

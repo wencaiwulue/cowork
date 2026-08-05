@@ -31,19 +31,19 @@ For each new or changed privileged channel, verify the matching controls:
   process.
 - User MCP Enable/Disable uses `mcp:setEnabled`, validates the server name and
   boolean state, and updates only `disabledMcpServers` in the user
-  `settings.json` while leaving the `.mcp.json` server definition intact.
+  `settings.json` while leaving the `.kode.mcp.json` server definition intact.
 - Project scheduled task Pause/Resume uses `workspaceTasks:pause` and
   `workspaceTasks:resume`, validates workspace cwd plus task id, and moves task
-  records only between `.claude/scheduled_tasks.json` and
-  `.claude/scheduled_tasks.paused.json` after `assertWorkspaceFileTarget`
+  records only between `.kode/scheduled_tasks.json` and
+  `.kode/scheduled_tasks.paused.json` after `assertWorkspaceFileTarget`
   rejects symlink targets.
 - Project MCP approval uses `workspaceMcp:setApproval`, which validates the
   workspace cwd, server name, and boolean decision before writing only the
-  current workspace's `.claude/settings.local.json` through
+  current workspace's `.kode/settings.local.json` through
   `assertWorkspaceFileTarget`.
 - Team member removal uses `teams:removeMember`, validates the session id,
   team name, and member name, then resolves the stored session cwd before
-  updating only the selected workspace's `.claude/teams/<name>/config.json`.
+  updating only the selected workspace's `.kode/teams/<name>/config.json`.
   Runtime shutdown remains a separate `teams:shutdown` request.
 - Terminal channels: create terminals only from a validated workspace cwd,
   resize with bounded numeric columns/rows, and kill/write only by terminal id.

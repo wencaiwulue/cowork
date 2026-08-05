@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 export function defaultDesktopWorkspace(home = homedir()): string {
-  return join(home, '.claude', 'desktop-workspace')
+  return join(home, '.kode', 'desktop-workspace')
 }
 
 export async function ensureDefaultDesktopWorkspace(home = homedir()): Promise<string> {

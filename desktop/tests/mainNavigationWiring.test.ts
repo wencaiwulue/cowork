@@ -5294,8 +5294,8 @@ describe('desktop main navigation wiring', () => {
     const workspaceEnd = smokeSource.indexOf('async function setupPlainWorkspace()', workspaceStart)
     const workspaceBody = smokeSource.slice(workspaceStart, workspaceEnd)
 
-    expect(workspaceBody).toContain("mkdir(join(cwd, '.claude/teams/frontend')")
-    expect(workspaceBody).toContain("writeFile(join(cwd, '.claude/teams/frontend/config.json')")
+    expect(workspaceBody).toContain("mkdir(join(cwd, '.kode/teams/frontend')")
+    expect(workspaceBody).toContain("writeFile(join(cwd, '.kode/teams/frontend/config.json')")
     expect(workspaceBody).toContain("name: 'frontend'")
     expect(workspaceBody).toContain("name: 'alice'")
   })
@@ -5381,8 +5381,8 @@ describe('desktop main navigation wiring', () => {
     const evidenceSource = readFileSync(join(process.cwd(), 'desktop/scripts/smoke-evidence.mjs'), 'utf8')
 
     expect(evidenceSource).toContain("'composerCustomSlashCommand'")
-    expect(smokeSource).toContain("mkdir(join(cwd, '.claude/commands'), { recursive: true })")
-    expect(smokeSource).toContain("join(cwd, '.claude/commands/desktop-smoke.md')")
+    expect(smokeSource).toContain("mkdir(join(cwd, '.kode/commands'), { recursive: true })")
+    expect(smokeSource).toContain("join(cwd, '.kode/commands/desktop-smoke.md')")
     expect(smokeSource).toContain('composerCustomSlashCommand: true')
     expect(smokeSource).toContain("fillComposer(page, '/project:desktop-smoke')")
     expect(smokeSource).toContain("hasText: '/project:desktop-smoke'")

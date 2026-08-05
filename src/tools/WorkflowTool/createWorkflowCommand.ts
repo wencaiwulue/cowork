@@ -3,7 +3,7 @@ import { basename, dirname, join, relative, sep } from 'node:path'
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
 import { parse as parseYaml } from 'yaml'
 import type { Command } from '../../types/command.js'
-import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
+import { getKodeConfigHomeDir } from '../../utils/envUtils.js'
 
 type WorkflowFile = {
   filePath: string
@@ -63,8 +63,8 @@ export function createWorkflowCommand(file: WorkflowFile): Command | undefined {
 
 export async function getWorkflowCommands(cwd: string): Promise<Command[]> {
   const files = [
-    ...await listWorkflowFiles('projectSettings', join(cwd, '.claude', 'workflows')),
-    ...await listWorkflowFiles('userSettings', join(getClaudeConfigHomeDir(), 'workflows')),
+    ...await listWorkflowFiles('projectSettings', join(cwd, '.kode', 'workflows')),
+    ...await listWorkflowFiles('userSettings', join(getKodeConfigHomeDir(), 'workflows')),
   ]
   return files
     .sort(compareWorkflowFiles)

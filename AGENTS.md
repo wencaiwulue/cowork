@@ -21,7 +21,7 @@
    - Do NOT wait for the user to ask you to commit/push. This is automatic and mandatory for every completed task, including trivial fixes. If there are no changes to commit, skip silently.
    - The commit message should follow conventional commits style: `feat:`, `fix:`, `refactor:`, `docs:`, `style:`, `chore:`, etc.
 
-If you are reading this file (Codex via `AGENTS.md` or Claude Code via `CLAUDE.md`), this policy applies to you. No exceptions for convenience or speed. Skipping the design doc step is a policy violation.
+If you are reading this file (Codex via `AGENTS.md` or Claude Code via `KODE.md`), this policy applies to you. No exceptions for convenience or speed. Skipping the design doc step is a policy violation.
 
 ---
 

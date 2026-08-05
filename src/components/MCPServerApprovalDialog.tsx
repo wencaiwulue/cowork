@@ -60,7 +60,7 @@ export function MCPServerApprovalDialog(t0) {
     t1 = $[2];
   }
   const onChange = t1;
-  const t2 = `New MCP server found in .mcp.json: ${serverName}`;
+  const t2 = `New MCP server found in .kode.mcp.json: ${serverName}`;
   let t3;
   if ($[3] !== onChange) {
     t3 = () => onChange("no");

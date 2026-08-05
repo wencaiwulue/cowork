@@ -19,7 +19,7 @@ while the renderer talks only through the typed preload IPC bridge.
   session or when the focused session restores to Chat/Files-style panes, so a
   lifecycle jump from one session cannot later scroll a different session.
 - The empty desktop state includes both a Quick session action, which starts in
-  the dedicated `~/.claude/desktop-workspace` folder without opening a picker,
+  the dedicated `~/.kode/desktop-workspace` folder without opening a picker,
   and a Choose folder action for project-specific workspaces. The left rail New
   session button opens the same explicit choice instead of hiding folder
   association behind a generic plus button. Folder picker cancellation without
@@ -264,7 +264,7 @@ while the renderer talks only through the typed preload IPC bridge.
 - If the runtime exits during assistant or thinking streaming, the desktop
   marks the partial streamed message complete before showing the stopped or
   failed session state.
-- `~/.claude/settings.json` environment values are applied to runtime children,
+- `~/.kode/settings.json` environment values are applied to runtime children,
   and desktop proxy settings add `HTTP_PROXY`, `HTTPS_PROXY`, and `ALL_PROXY`
   variants when enabled.
 - Main-process startup auditing covers every `ipcRenderer.invoke` channel
@@ -503,9 +503,9 @@ while the renderer talks only through the typed preload IPC bridge.
 - Proxy Save routes stale button clicks through the save handler, so the current
   URL validity prerequisite surfaces as Settings feedback instead of being
   silently swallowed after the visible disabled state changes.
-- MCP management supports add/update/remove for user and project `.mcp.json`
+- MCP management supports add/update/remove for user and project `.kode.mcp.json`
   files, user MCP Enable/Disable state through `disabledMcpServers`, project
-  MCP Approve/Reject lifecycle state in `.claude/settings.local.json`, plus a
+  MCP Approve/Reject lifecycle state in `.kode/settings.local.json`, plus a
   guarded project MCP health check through the CLI.
 - MCP health output uses a structured Settings empty state when the CLI returns
   no stdout or stderr, so a completed health check still leaves visible result
@@ -749,8 +749,8 @@ while the renderer talks only through the typed preload IPC bridge.
   session being restored when the saved task no longer exists, so delayed task
   list refreshes cannot clear another workspace's selected task layout.
 - Skill installation copies local skill folders into user or project
-  `.claude/skills` locations after verifying `SKILL.md`.
-- Project skill listing and installation verify the workspace `.claude/skills`
+  `.kode/skills` locations after verifying `SKILL.md`.
+- Project skill listing and installation verify the workspace `.kode/skills`
   target is not a symlink before reading or copying, so a project cannot expose
   or redirect skill files outside the selected workspace.
 - User and project skill install buttons surface cancellation feedback when the
@@ -959,8 +959,8 @@ while the renderer talks only through the typed preload IPC bridge.
 - Plugin command output uses the same Settings empty-state pattern when a list
   or install command completes without stdout/stderr, so an empty CLI response
   still leaves visible success or failure feedback instead of a bare placeholder.
-- Global scheduled tasks are stored in `~/.claude/scheduled_tasks.json`; project
-  scheduled tasks are stored in `.claude/scheduled_tasks.json`. Enabled cron
+- Global scheduled tasks are stored in `~/.kode/scheduled_tasks.json`; project
+  scheduled tasks are stored in `.kode/scheduled_tasks.json`. Enabled cron
   tasks can be run manually and are also fired by the desktop scheduler;
   `globalScheduledTaskRunNow`, `automaticGlobalScheduler`, and
   `automaticProjectScheduler` confirm both manual and automatic scheduler paths.
@@ -997,8 +997,8 @@ while the renderer talks only through the typed preload IPC bridge.
   that a project session is required when invoked from menus or shortcuts before
   a workspace is selected.
 - Project scheduled task Pause/Resume keeps Claude Code's native
-  `.claude/scheduled_tasks.json` schema unchanged. Paused tasks move to the
-  desktop sidecar `.claude/scheduled_tasks.paused.json`; Resume moves them back
+  `.kode/scheduled_tasks.json` schema unchanged. Paused tasks move to the
+  desktop sidecar `.kode/scheduled_tasks.paused.json`; Resume moves them back
   into the active native task file.
 - Project scheduled task Pause/Resume actions use the same synchronous guard as
   other task lifecycle actions, so rapid repeated clicks submit one pause or
@@ -1241,7 +1241,7 @@ while the renderer talks only through the typed preload IPC bridge.
   editor draft source for its session prerequisite, so a stale project draft
   cannot block deleting an editable user agent without an active project
   session.
-- Project agent List/Diagnose/Save/Delete verifies `.claude/agents` and target
+- Project agent List/Diagnose/Save/Delete verifies `.kode/agents` and target
   markdown files stay inside the selected workspace and rejects symlinked agent
   directories, so agent management cannot read, write, or remove files outside
   the project.
@@ -1374,13 +1374,13 @@ while the renderer talks only through the typed preload IPC bridge.
   servers; typing `/` opens action shortcuts that either insert concrete prompts
   or execute safe local pane actions.
 - The `/` menu also discovers user and project custom slash commands from
-  `~/.claude/commands/**/*.md` and `.claude/commands/**/*.md`, showing them as
+  `~/.kode/commands/**/*.md` and `.kode/commands/**/*.md`, showing them as
   `/user:name` or `/project:group:name` entries. Symlinked command files and
   directories are skipped before anything is exposed to the renderer. Command
   path segments must be made from letters, numbers, `.`, `_`, or `-`; entries
   with whitespace, control characters, or delimiter characters are skipped.
 - Workflow markdown files are also loaded as prompt commands from
-  `~/.claude/workflows/**/*.md` and `.claude/workflows/**/*.md`. Project
+  `~/.kode/workflows/**/*.md` and `.kode/workflows/**/*.md`. Project
   workflows sort before user workflows, nested directories become colon
   namespaces such as `/review:security`, frontmatter descriptions,
   `argument-hint`, `arguments`, and `allowed-tools` are preserved, and command
@@ -1612,7 +1612,7 @@ while the renderer talks only through the typed preload IPC bridge.
   teammate/broadcast message preparation handlers report through the Teams pane
   before mutating drafts or composer routing.
 - Team create/update writes a durable project-scoped
-  `.claude/teams/<name>/config.json` record with desktop backend metadata,
+  `.kode/teams/<name>/config.json` record with desktop backend metadata,
   active status, and a configured lead member when a lead agent type is
   provided. Teammate spawn upserts a member row into that same workspace record
   after the Agent runtime request is queued. Member remove deletes stale local
@@ -1847,7 +1847,7 @@ while the renderer talks only through the typed preload IPC bridge.
 - Project scheduled tasks expose Pause/Resume directly in the Tasks page list;
   Electron smoke verifies the visible paused/enabled state, disabled Run now
   behavior for paused tasks, and movement between active native tasks and the
-  `.claude/scheduled_tasks.paused.json` sidecar.
+  `.kode/scheduled_tasks.paused.json` sidecar.
 - Skill install smoke covers both user and project picker cancellation feedback
   in addition to successful local/project installs.
 - Project skill session guidance is covered by Electron smoke while no active
@@ -1868,14 +1868,14 @@ while the renderer talks only through the typed preload IPC bridge.
   button label changes, and `disabledMcpServers` persistence in
   `settings.json`.
 - User and project MCP Inspect are covered by Electron smoke for visible
-  details panels, source `.mcp.json` paths, commands, and arguments.
+  details panels, source `.kode.mcp.json` paths, commands, and arguments.
 - MCP health checks are covered by Electron smoke for rapid repeated clicks, so
   duplicate CLI checks are not launched before disabled state renders.
 - MCP edit cancellation stays disabled during active desktop loading so save
   and refresh requests cannot race against draft clearing.
 - Project MCP approval lifecycle is covered by Electron smoke: Approve/Reject
   updates the visible status and persists `enabledMcpjsonServers` /
-  `disabledMcpjsonServers` in `.claude/settings.local.json`.
+  `disabledMcpjsonServers` in `.kode/settings.local.json`.
 - Scheduled task removal while editing is covered by Electron smoke for both
   global and project tasks, including cleared inputs and disabled Add buttons.
 - Scheduled task edit cancellation stays disabled during active desktop loading
@@ -2306,7 +2306,7 @@ requirements.
   name entries.
 - `composerCustomSlashCommand`, `composerLifecycleActionShortcuts`, and
   `composerSettingsActionShortcuts` confirm Electron smoke exposes a project
-  `.claude/commands` slash command through the real composer menu, selects
+  `.kode/commands` slash command through the real composer menu, selects
   `/project:desktop-smoke` back into the focused composer, executes
   `/new-custom`, `/add-mcp`, `/new-user-skill`, and `/new-project-skill`,
   verifies the destination page, and checks the visible clean draft/status

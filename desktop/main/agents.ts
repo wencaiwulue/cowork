@@ -796,11 +796,11 @@ async function pathExists(path: string): Promise<boolean> {
 }
 
 function projectAgentsDir(cwd: string): string {
-  return join(cwd, '.claude', 'agents')
+  return join(cwd, '.kode', 'agents')
 }
 
 async function ensureProjectAgentsDir(cwd: string): Promise<string> {
-  const claudeDir = join(cwd, '.claude')
+  const claudeDir = join(cwd, '.kode')
   await assertWorkspaceFileTarget(cwd, claudeDir, { forWrite: true })
   await mkdir(claudeDir, { recursive: true })
   const agentsDir = projectAgentsDir(cwd)
@@ -810,9 +810,9 @@ async function ensureProjectAgentsDir(cwd: string): Promise<string> {
 }
 
 function teamsDir(cwd?: string): string {
-  if (cwd) return join(cwd, '.claude', 'teams')
+  if (cwd) return join(cwd, '.kode', 'teams')
   const env = Function('return process.env')() as NodeJS.ProcessEnv
-  return join(env.CLAUDE_CONFIG_DIR ?? claudeHomeDir(env), 'teams')
+  return join(env.KODE_CONFIG_DIR ?? claudeHomeDir(env), 'teams')
 }
 
 function teamDir(teamName: string, cwd?: string): string {
@@ -880,7 +880,7 @@ async function ensureTeamsDir(cwd?: string): Promise<string> {
     await mkdir(root, { recursive: true })
     return root
   }
-  const claudeDir = join(cwd, '.claude')
+  const claudeDir = join(cwd, '.kode')
   await assertWorkspaceFileTarget(cwd, claudeDir, { forWrite: true })
   await mkdir(claudeDir, { recursive: true })
   await assertWorkspaceFileTarget(cwd, root, { forWrite: true })

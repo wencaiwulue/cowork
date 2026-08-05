@@ -47,7 +47,7 @@ import type {
   UserMessage,
 } from '../types/message.js'
 import { toolToAPISchema } from './api.js'
-import { filterInjectedMemoryFiles, getMemoryFiles } from './claudemd.js'
+import { filterInjectedMemoryFiles, getMemoryFiles } from './kodemd.js'
 import { getContextWindowForModel } from './context.js'
 import { getCwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
@@ -324,7 +324,7 @@ async function countMemoryFileTokens(): Promise<{
   memoryFileDetails: MemoryFile[]
   claudeMdTokens: number
 }> {
-  // Simple mode disables CLAUDE.md loading, so don't report tokens for them
+  // Simple mode disables KODE.md loading, so don't report tokens for them
   if (isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) {
     return { memoryFileDetails: [], claudeMdTokens: 0 }
   }

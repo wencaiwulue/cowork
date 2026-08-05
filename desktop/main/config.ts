@@ -20,7 +20,7 @@ import type {
 const secretKeyPattern = /(token|secret|password|authorization|auth|api[_-]?key|key)$/i
 
 export function claudeHomeDir(env = runtimeEnv()): string {
-  return env.CLAUDE_CODE_DESKTOP_CLAUDE_HOME || join(homedir(), '.claude')
+  return env.CLAUDE_CODE_DESKTOP_CLAUDE_HOME || join(homedir(), '.kode')
 }
 
 function runtimeEnv(): NodeJS.ProcessEnv {
@@ -311,7 +311,7 @@ export async function loadClaudeDesktopConfig(): Promise<ClaudeDesktopConfig> {
   const home = claudeHomeDir()
   const settingsPath = join(home, 'settings.json')
   const localSettingsPath = join(home, 'settings.local.json')
-  const mcpPath = join(home, '.mcp.json')
+  const mcpPath = join(home, '.kode.mcp.json')
   const scheduledTasksPath = join(home, 'scheduled_tasks.json')
   const pluginsPath = join(home, 'plugins/installed_plugins.json')
   const [settings, localSettings, mcpConfig, scheduledTasks, pluginsRaw, skills, store] =
@@ -361,7 +361,7 @@ export async function saveDesktopProxySettings(
 }
 
 function projectClaudeDir(cwd: string): string {
-  return join(cwd, '.claude')
+  return join(cwd, '.kode')
 }
 
 export async function listProjectSkills(cwd: string): Promise<InstalledSkillInfo[]> {
@@ -558,15 +558,15 @@ export async function readProjectSkill(
 }
 
 function mcpPath(): string {
-  return join(claudeHomeDir(), '.mcp.json')
+  return join(claudeHomeDir(), '.kode.mcp.json')
 }
 
 function projectMcpPath(cwd: string): string {
-  return join(cwd, '.mcp.json')
+  return join(cwd, '.kode.mcp.json')
 }
 
 function projectLocalSettingsPath(cwd: string): string {
-  return join(cwd, '.claude/settings.local.json')
+  return join(cwd, '.kode/settings.local.json')
 }
 
 function scheduledTasksPath(): string {
@@ -737,7 +737,7 @@ export async function removeProjectMcpServer(
   if (nextEnabled.length !== enabled.length || nextDisabled.length !== disabled.length) {
     settings.enabledMcpjsonServers = nextEnabled
     settings.disabledMcpjsonServers = nextDisabled
-    await mkdir(join(cwd, '.claude'), { recursive: true })
+    await mkdir(join(cwd, '.kode'), { recursive: true })
     const safeSettingsPath = await assertWorkspaceFileTarget(cwd, settingsPath, { forWrite: true })
     await writeFile(safeSettingsPath, `${JSON.stringify(settings, null, 2)}\n`)
   }
@@ -768,7 +768,7 @@ export async function setProjectMcpServerApproval(
     settings.enabledMcpjsonServers = enabled.filter(item => item !== name)
   }
 
-  await mkdir(join(cwd, '.claude'), { recursive: true })
+  await mkdir(join(cwd, '.kode'), { recursive: true })
   const safePath = await assertWorkspaceFileTarget(cwd, settingsPath, { forWrite: true })
   await writeFile(safePath, `${JSON.stringify(settings, null, 2)}\n`)
   return listProjectMcpServers(cwd)

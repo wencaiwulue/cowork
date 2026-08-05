@@ -70,7 +70,7 @@ export function MCPServerMultiselectDialog(t0) {
     t2 = $[5];
   }
   const handleEscRejectAll = t2;
-  const t3 = `${serverNames.length} new MCP servers found in .mcp.json`;
+  const t3 = `${serverNames.length} new MCP servers found in .kode.mcp.json`;
   let t4;
   if ($[6] === Symbol.for("react.memo_cache_sentinel")) {
     t4 = <MCPServerDialogCopy />;

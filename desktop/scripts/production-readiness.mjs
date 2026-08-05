@@ -2426,7 +2426,7 @@ async function main() {
     'rapidProjectScheduledTaskRemoveGuard',
     'rapidProjectScheduledRunNowGuard',
     'automaticProjectScheduler',
-    'MCP management supports add/update/remove for user and project `.mcp.json`',
+    'MCP management supports add/update/remove for user and project `.kode.mcp.json`',
     'mcpManagement',
     'projectMcpManagement',
     'userMcpInspect',

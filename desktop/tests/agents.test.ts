@@ -26,7 +26,7 @@ import {
 } from '../main/agents'
 
 const originalClaudeHome = process.env.CLAUDE_CODE_DESKTOP_CLAUDE_HOME
-const originalConfigDir = process.env.CLAUDE_CONFIG_DIR
+const originalConfigDir = process.env.KODE_CONFIG_DIR
 const originalDisableAgentCli = process.env.CLAUDE_CODE_DESKTOP_DISABLE_AGENT_CLI
 
 afterEach(() => {
@@ -36,9 +36,9 @@ afterEach(() => {
     process.env.CLAUDE_CODE_DESKTOP_CLAUDE_HOME = originalClaudeHome
   }
   if (originalConfigDir === undefined) {
-    delete process.env.CLAUDE_CONFIG_DIR
+    delete process.env.KODE_CONFIG_DIR
   } else {
-    process.env.CLAUDE_CONFIG_DIR = originalConfigDir
+    process.env.KODE_CONFIG_DIR = originalConfigDir
   }
   if (originalDisableAgentCli === undefined) {
     delete process.env.CLAUDE_CODE_DESKTOP_DISABLE_AGENT_CLI
@@ -49,12 +49,12 @@ afterEach(() => {
 
 async function setupAgentWorkspace() {
   const root = join(tmpdir(), `claude-desktop-agents-${randomUUID()}`)
-  const home = join(root, '.claude-home')
+  const home = join(root, '.kode-home')
   const cwd = join(root, 'project')
   await mkdir(home, { recursive: true })
   await mkdir(cwd, { recursive: true })
   process.env.CLAUDE_CODE_DESKTOP_CLAUDE_HOME = home
-  process.env.CLAUDE_CONFIG_DIR = home
+  process.env.KODE_CONFIG_DIR = home
   process.env.CLAUDE_CODE_DESKTOP_DISABLE_AGENT_CLI = '1'
   return { root, home, cwd }
 }
@@ -70,7 +70,7 @@ describe('desktop agent service', () => {
         tools: ['Read'],
         requiredMcpServers: ['playwright'],
         model: 'sonnet',
-        baseDir: '/repo/.claude/agents',
+        baseDir: '/repo/.kode/agents',
         filename: 'reviewer',
       }, {
         agentType: 'plugin-helper',
@@ -87,7 +87,7 @@ describe('desktop agent service', () => {
         tools: ['Read'],
         requiredMcpServers: ['playwright'],
         model: 'sonnet',
-        baseDir: '/repo/.claude/agents',
+        baseDir: '/repo/.kode/agents',
         filename: 'reviewer',
       }, {
         agentType: 'reviewer',
@@ -112,7 +112,7 @@ describe('desktop agent service', () => {
         tools: ['Read'],
         requiredMcpServers: ['playwright'],
         model: 'sonnet',
-        path: '/repo/.claude/agents/reviewer.md',
+        path: '/repo/.kode/agents/reviewer.md',
       },
       {
         agentType: 'plugin-helper',
@@ -166,7 +166,7 @@ describe('desktop agent service', () => {
 
   it('saves, lists, diagnoses, and deletes editable project agents', async () => {
     const { cwd } = await setupAgentWorkspace()
-    await writeFile(join(cwd, '.mcp.json'), JSON.stringify({
+    await writeFile(join(cwd, '.kode.mcp.json'), JSON.stringify({
       mcpServers: {
         playwright: { command: 'npx', args: ['@playwright/mcp'] },
       },
@@ -200,7 +200,7 @@ describe('desktop agent service', () => {
       isolation: 'worktree',
       prompt: 'Review carefully.',
     })
-    expect(await readFile(join(cwd, '.claude/agents/reviewer.md'), 'utf8'))
+    expect(await readFile(join(cwd, '.kode/agents/reviewer.md'), 'utf8'))
       .toContain('description: "Use for code review."')
 
     const listed = await listAgents(cwd)
@@ -258,7 +258,7 @@ describe('desktop agent service', () => {
     await expect(deleteAgent(cwd, 'missing-project-agent', 'project')).rejects.toThrow(
       'Agent not found: missing-project-agent',
     )
-    await expect(readFile(join(cwd, '.claude/agents/missing-project-agent.md'), 'utf8'))
+    await expect(readFile(join(cwd, '.kode/agents/missing-project-agent.md'), 'utf8'))
       .rejects
       .toThrow()
   })
@@ -266,7 +266,7 @@ describe('desktop agent service', () => {
   it('rejects project agent save and delete through symlinked workspace agent directories', async () => {
     const { root, cwd } = await setupAgentWorkspace()
     const outside = join(root, 'outside-agents')
-    await mkdir(join(cwd, '.claude'), { recursive: true })
+    await mkdir(join(cwd, '.kode'), { recursive: true })
     await mkdir(outside, { recursive: true })
     await writeFile(join(outside, 'reviewer.md'), [
       '---',
@@ -277,7 +277,7 @@ describe('desktop agent service', () => {
       'outside',
       '',
     ].join('\n'))
-    await symlink(outside, join(cwd, '.claude/agents'))
+    await symlink(outside, join(cwd, '.kode/agents'))
 
     await expect(listAgents(cwd)).rejects.toThrow(
       'Workspace file target must not be a symlink:',
@@ -461,7 +461,7 @@ describe('desktop agent service', () => {
     await expect(deleteTeam({ teamName: 'missing-team' }, cwd)).rejects.toThrow(
       'Team not found: missing-team',
     )
-    await expect(readFile(join(cwd, '.claude/teams/missing-team/config.json'), 'utf8'))
+    await expect(readFile(join(cwd, '.kode/teams/missing-team/config.json'), 'utf8'))
       .rejects
       .toThrow()
   })
@@ -529,9 +529,9 @@ describe('desktop agent service', () => {
     await deleteTeam({ teamName: 'frontend' }, cwd)
     expect(await listTeams(cwd)).toEqual([])
     expect(await listTeams(otherCwd)).toHaveLength(1)
-    await expect(readFile(join(cwd, '.claude/teams/frontend/config.json'), 'utf8'))
+    await expect(readFile(join(cwd, '.kode/teams/frontend/config.json'), 'utf8'))
       .rejects.toThrow()
-    expect(await readFile(join(otherCwd, '.claude/teams/frontend/config.json'), 'utf8'))
+    expect(await readFile(join(otherCwd, '.kode/teams/frontend/config.json'), 'utf8'))
       .toContain('Workspace B')
   })
 
@@ -543,8 +543,8 @@ describe('desktop agent service', () => {
       join(outsideTeams, 'frontend/config.json'),
       JSON.stringify({ name: 'frontend', members: [] }),
     )
-    await mkdir(join(cwd, '.claude'), { recursive: true })
-    await symlink(outsideTeams, join(cwd, '.claude/teams'))
+    await mkdir(join(cwd, '.kode'), { recursive: true })
+    await symlink(outsideTeams, join(cwd, '.kode/teams'))
 
     await expect(listTeams(cwd)).rejects.toThrow(
       'Workspace file target must not be a symlink',

@@ -52,7 +52,7 @@ Expose the agent platform as first-class desktop workflows:
   agents with source, description, tools, model, permission mode, MCP
   requirements, skills, hooks, memory, and isolation metadata.
 - Agent editing: create, update, and delete user/project agents using the same
-  markdown/frontmatter model as `.claude/agents` and the user agent directory.
+  markdown/frontmatter model as `.kode/agents` and the user agent directory.
 - Agent launch: start a main session with a selected agent, or launch a
   subagent from an existing session with `description`, `prompt`,
   `subagent_type`, `model`, `run_in_background`, `isolation`, and optional

@@ -11026,7 +11026,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                 <div className="workarea-empty task-empty-state">
                   <Icon name="play" />
                   <strong>No project scheduled tasks</strong>
-                  <span>Add a cron schedule and prompt to write this workspace's .claude/scheduled_tasks.json.</span>
+                  <span>Add a cron schedule and prompt to write this workspace's .kode/scheduled_tasks.json.</span>
                   <div className="empty-actions">
                     <button className="tool-button" onClick={() => startNewProjectScheduledTaskDraft()} disabled={!activeSession || isLoading('session')}>
                       <Icon name="plus" />Add task
@@ -13458,7 +13458,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                       <div className="workarea-empty settings-empty-state">
                         <Icon name="settings" />
                         <strong>No project MCP servers</strong>
-                        <span>Add a project-scoped MCP server to write this workspace's .mcp.json.</span>
+                        <span>Add a project-scoped MCP server to write this workspace's .kode.mcp.json.</span>
                       </div>
                     ) : (
                       <div className="workarea-empty settings-empty-state">
@@ -13743,7 +13743,7 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                   <div className="settings-grid">
                     <div>
                       <small>Claude home</small>
-                      <code>{desktopConfig?.claudeHome ?? '~/.claude'}</code>
+                      <code>{desktopConfig?.claudeHome ?? '~/.kode'}</code>
                     </div>
                     <div>
                       <small>settings.json</small>

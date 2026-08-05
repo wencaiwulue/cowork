@@ -17,7 +17,7 @@ export function desktopStorePath(
   env = Function('return process.env')() as NodeJS.ProcessEnv,
 ): string {
   return env.CLAUDE_CODE_DESKTOP_STORE_PATH ||
-    join(homedir(), '.claude', 'desktop-sessions.json')
+    join(homedir(), '.kode', 'desktop-sessions.json')
 }
 
 export async function loadDesktopStore(): Promise<DesktopStore> {

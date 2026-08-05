@@ -15,7 +15,7 @@ import {
 
 async function tempWorkspace(): Promise<string> {
   const root = join(tmpdir(), `claude-desktop-tasks-${randomUUID()}`)
-  await mkdir(join(root, '.claude'), { recursive: true })
+  await mkdir(join(root, '.kode'), { recursive: true })
   return root
 }
 
@@ -54,7 +54,7 @@ describe('project scheduled tasks', () => {
     }])
     expect(tasks[0]?.recurring).toBeUndefined()
 
-    const raw = JSON.parse(await readFile(join(root, '.claude/scheduled_tasks.json'), 'utf8'))
+    const raw = JSON.parse(await readFile(join(root, '.kode/scheduled_tasks.json'), 'utf8'))
     expect(raw.tasks[0]).toMatchObject({
       id: tasks[0]!.id,
       cron: '30 10 * * 1',
@@ -69,7 +69,7 @@ describe('project scheduled tasks', () => {
 
   it('rejects removing a missing project scheduled task', async () => {
     const root = await tempWorkspace()
-    await writeFile(join(root, '.claude/scheduled_tasks.json'), JSON.stringify({
+    await writeFile(join(root, '.kode/scheduled_tasks.json'), JSON.stringify({
       tasks: [{
         id: 'existing-task',
         cron: '0 9 * * *',
@@ -85,7 +85,7 @@ describe('project scheduled tasks', () => {
 
   it('rejects updating a missing project scheduled task id', async () => {
     const root = await tempWorkspace()
-    await writeFile(join(root, '.claude/scheduled_tasks.json'), JSON.stringify({
+    await writeFile(join(root, '.kode/scheduled_tasks.json'), JSON.stringify({
       tasks: [{
         id: 'existing-task',
         cron: '0 9 * * *',
@@ -99,7 +99,7 @@ describe('project scheduled tasks', () => {
       cron: '30 10 * * 1',
       prompt: 'updated prompt',
     })).rejects.toThrow('Project scheduled task not found: missing-task')
-    const raw = JSON.parse(await readFile(join(root, '.claude/scheduled_tasks.json'), 'utf8'))
+    const raw = JSON.parse(await readFile(join(root, '.kode/scheduled_tasks.json'), 'utf8'))
     expect(raw.tasks).toHaveLength(1)
     expect(raw.tasks[0].id).toBe('existing-task')
   })
@@ -107,7 +107,7 @@ describe('project scheduled tasks', () => {
   it('pauses and resumes project scheduled tasks without changing the native active schema', async () => {
     const root = await tempWorkspace()
     const createdAt = new Date(2026, 0, 1, 0, 0).getTime()
-    await writeFile(join(root, '.claude/scheduled_tasks.json'), JSON.stringify({
+    await writeFile(join(root, '.kode/scheduled_tasks.json'), JSON.stringify({
       tasks: [{
         id: 'recurring',
         cron: '1 0 * * *',
@@ -123,8 +123,8 @@ describe('project scheduled tasks', () => {
       enabled: false,
       nextRunAt: undefined,
     }])
-    expect(JSON.parse(await readFile(join(root, '.claude/scheduled_tasks.json'), 'utf8')).tasks).toEqual([])
-    const pausedRaw = JSON.parse(await readFile(join(root, '.claude/scheduled_tasks.paused.json'), 'utf8'))
+    expect(JSON.parse(await readFile(join(root, '.kode/scheduled_tasks.json'), 'utf8')).tasks).toEqual([])
+    const pausedRaw = JSON.parse(await readFile(join(root, '.kode/scheduled_tasks.paused.json'), 'utf8'))
     expect(pausedRaw.tasks[0]).toMatchObject({
       id: 'recurring',
       cron: '1 0 * * *',
@@ -141,13 +141,13 @@ describe('project scheduled tasks', () => {
       enabled: true,
       nextRunAt: new Date(2026, 0, 1, 0, 1).getTime(),
     }])
-    expect(JSON.parse(await readFile(join(root, '.claude/scheduled_tasks.paused.json'), 'utf8')).tasks).toEqual([])
-    expect(JSON.parse(await readFile(join(root, '.claude/scheduled_tasks.json'), 'utf8')).tasks[0].enabled).toBeUndefined()
+    expect(JSON.parse(await readFile(join(root, '.kode/scheduled_tasks.paused.json'), 'utf8')).tasks).toEqual([])
+    expect(JSON.parse(await readFile(join(root, '.kode/scheduled_tasks.json'), 'utf8')).tasks[0].enabled).toBeUndefined()
   })
 
   it('rejects pausing and resuming missing project scheduled tasks', async () => {
     const root = await tempWorkspace()
-    await writeFile(join(root, '.claude/scheduled_tasks.json'), JSON.stringify({
+    await writeFile(join(root, '.kode/scheduled_tasks.json'), JSON.stringify({
       tasks: [{
         id: 'active-task',
         cron: '0 9 * * *',
@@ -155,7 +155,7 @@ describe('project scheduled tasks', () => {
         createdAt: Date.now(),
       }],
     }))
-    await writeFile(join(root, '.claude/scheduled_tasks.paused.json'), JSON.stringify({
+    await writeFile(join(root, '.kode/scheduled_tasks.paused.json'), JSON.stringify({
       tasks: [{
         id: 'paused-task',
         cron: '0 10 * * *',
@@ -174,7 +174,7 @@ describe('project scheduled tasks', () => {
 
   it('ignores malformed tasks already present on disk', async () => {
     const root = await tempWorkspace()
-    await writeFile(join(root, '.claude/scheduled_tasks.json'), JSON.stringify({
+    await writeFile(join(root, '.kode/scheduled_tasks.json'), JSON.stringify({
       tasks: [
         { id: 'ok-task', cron: '0 9 * * *', prompt: 'ok', createdAt: Date.now() },
         { id: 'bad-task', cron: 'bad', prompt: 'bad', createdAt: Date.now() },
@@ -197,7 +197,7 @@ describe('project scheduled tasks', () => {
         createdAt: Date.now(),
       }],
     }))
-    await symlink(outsideTasks, join(root, '.claude', 'scheduled_tasks.json'))
+    await symlink(outsideTasks, join(root, '.kode', 'scheduled_tasks.json'))
 
     await expect(listProjectScheduledTasks(root)).rejects.toThrow(
       'Workspace file target must not be a symlink:',
@@ -229,7 +229,7 @@ describe('project scheduled tasks', () => {
         createdAt: Date.now(),
       }],
     }))
-    await symlink(outsideTasks, join(root, '.claude', 'scheduled_tasks.paused.json'))
+    await symlink(outsideTasks, join(root, '.kode', 'scheduled_tasks.paused.json'))
 
     await expect(listProjectScheduledTasks(root)).rejects.toThrow(
       'Workspace file target must not be a symlink:',
@@ -242,7 +242,7 @@ describe('project scheduled tasks', () => {
   it('computes next run from createdAt before the first fire', async () => {
     const root = await tempWorkspace()
     const createdAt = new Date(2026, 0, 1, 0, 0).getTime()
-    await writeFile(join(root, '.claude/scheduled_tasks.json'), JSON.stringify({
+    await writeFile(join(root, '.kode/scheduled_tasks.json'), JSON.stringify({
       tasks: [{
         id: 'future-from-created',
         cron: '1 0 * * *',
@@ -259,7 +259,7 @@ describe('project scheduled tasks', () => {
 
   it('fires due one-shot tasks once and removes them from disk', async () => {
     const root = await tempWorkspace()
-    await writeFile(join(root, '.claude/scheduled_tasks.json'), JSON.stringify({
+    await writeFile(join(root, '.kode/scheduled_tasks.json'), JSON.stringify({
       tasks: [{
         id: 'one-shot',
         cron: '1 0 * * *',
@@ -280,7 +280,7 @@ describe('project scheduled tasks', () => {
   it('fires due recurring tasks and persists lastFiredAt', async () => {
     const root = await tempWorkspace()
     const firedAt = new Date(2026, 0, 1, 0, 1).getTime()
-    await writeFile(join(root, '.claude/scheduled_tasks.json'), JSON.stringify({
+    await writeFile(join(root, '.kode/scheduled_tasks.json'), JSON.stringify({
       tasks: [{
         id: 'recurring',
         cron: '1 0 * * *',

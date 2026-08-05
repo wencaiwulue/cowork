@@ -294,7 +294,7 @@ describe('DesktopSessionManager focus and resume events', () => {
       selectedGlobalTaskId: 'task-1',
       selectedProjectTaskId: 'project-task-1',
       selectedMcpName: 'playwright',
-      selectedMcpSourcePath: '/tmp/.mcp.json',
+      selectedMcpSourcePath: '/tmp/.kode.mcp.json',
       selectedMcpScope: 'project',
       selectedSkillName: 'existing-skill',
       selectedSkillPath: '/tmp/skills/existing-skill',

@@ -58,7 +58,7 @@ afterEach(() => {
 
 async function setupClaudeHome() {
   const root = join(tmpdir(), `claude-desktop-config-${randomUUID()}`)
-  const home = join(root, '.claude')
+  const home = join(root, '.kode')
   await mkdir(home, { recursive: true })
   process.env.CLAUDE_CODE_DESKTOP_CLAUDE_HOME = home
   process.env.CLAUDE_CODE_DESKTOP_STORE_PATH = join(root, 'desktop-store.json')
@@ -117,7 +117,7 @@ describe('desktop config', () => {
         'disabled@claude-plugins-official': false,
       },
     }))
-    await writeFile(join(home, '.mcp.json'), JSON.stringify({
+    await writeFile(join(home, '.kode.mcp.json'), JSON.stringify({
       mcpServers: {
         playwright: { command: 'npx', args: ['@playwright/mcp'] },
       },
@@ -210,13 +210,13 @@ describe('desktop config', () => {
     const { home, root } = await setupClaudeHome()
     const project = join(root, 'project')
     await mkdir(join(home, 'skills/demo-skill'), { recursive: true })
-    await mkdir(join(project, '.claude/skills/project-skill'), { recursive: true })
+    await mkdir(join(project, '.kode/skills/project-skill'), { recursive: true })
     await writeFile(
       join(home, 'skills/demo-skill/SKILL.md'),
       '---\ndescription: Demo skill\n---\n\nUse this skill for demos.\n',
     )
     await writeFile(
-      join(project, '.claude/skills/project-skill/SKILL.md'),
+      join(project, '.kode/skills/project-skill/SKILL.md'),
       '---\ndescription: Project skill\n---\n\nUse this skill for the project.\n',
     )
 
@@ -228,7 +228,7 @@ describe('desktop config', () => {
     })
     expect(await readProjectSkill(project, 'project-skill')).toMatchObject({
       name: 'project-skill',
-      path: join(project, '.claude/skills/project-skill'),
+      path: join(project, '.kode/skills/project-skill'),
       description: 'Project skill',
       contents: expect.stringContaining('Use this skill for the project.'),
     })
@@ -267,7 +267,7 @@ describe('desktop config', () => {
     })).rejects.toThrow('Skill contents must not be empty')
   })
 
-  it('installs a local skill into project .claude/skills', async () => {
+  it('installs a local skill into project .kode/skills', async () => {
     const { root } = await setupClaudeHome()
     const project = join(root, 'project')
     const source = join(root, 'project-skill')
@@ -279,7 +279,7 @@ describe('desktop config', () => {
 
     expect(installed).toMatchObject({
       name: 'project-skill',
-      path: join(project, '.claude/skills/project-skill'),
+      path: join(project, '.kode/skills/project-skill'),
     })
     expect(await listProjectSkills(project)).toMatchObject([{
       name: 'project-skill',
@@ -287,7 +287,7 @@ describe('desktop config', () => {
     }])
 
     expect(await removeProjectSkill(project, 'project-skill')).toEqual([])
-    await expect(readFile(join(project, '.claude/skills/project-skill/SKILL.md'), 'utf8'))
+    await expect(readFile(join(project, '.kode/skills/project-skill/SKILL.md'), 'utf8'))
       .rejects
       .toThrow()
     await expect(removeProjectSkill(project, '../outside')).rejects.toThrow(
@@ -305,7 +305,7 @@ describe('desktop config', () => {
     )
   })
 
-  it('saves project skill content inside workspace .claude/skills', async () => {
+  it('saves project skill content inside workspace .kode/skills', async () => {
     const { root } = await setupClaudeHome()
     const project = join(root, 'project')
     await mkdir(project, { recursive: true })
@@ -317,11 +317,11 @@ describe('desktop config', () => {
 
     expect(saved).toMatchObject({
       name: 'project-draft',
-      path: join(project, '.claude/skills/project-draft'),
+      path: join(project, '.kode/skills/project-draft'),
       description: 'Project draft',
       contents: expect.stringContaining('Use this skill in this repo.'),
     })
-    await expect(readFile(join(project, '.claude/skills/project-draft/SKILL.md'), 'utf8'))
+    await expect(readFile(join(project, '.kode/skills/project-draft/SKILL.md'), 'utf8'))
       .resolves
       .toContain('Use this skill in this repo.')
   })
@@ -331,13 +331,13 @@ describe('desktop config', () => {
     const project = join(root, 'project')
     const outside = join(root, 'outside-skills')
     const source = join(root, 'project-skill')
-    await mkdir(join(project, '.claude'), { recursive: true })
+    await mkdir(join(project, '.kode'), { recursive: true })
     await mkdir(outside, { recursive: true })
     await mkdir(source, { recursive: true })
     await writeFile(join(source, 'SKILL.md'), '---\ndescription: Project skill\n---\n')
     await mkdir(join(outside, 'external-skill'), { recursive: true })
     await writeFile(join(outside, 'external-skill/SKILL.md'), '---\ndescription: External skill\n---\n')
-    await symlink(outside, join(project, '.claude/skills'))
+    await symlink(outside, join(project, '.kode/skills'))
 
     await expect(listProjectSkills(project)).rejects.toThrow(
       'Workspace file target must not be a symlink:',
@@ -361,7 +361,7 @@ describe('desktop config', () => {
 
   it('adds, updates, and removes MCP servers without leaking preserved remote URLs', async () => {
     const { home } = await setupClaudeHome()
-    await writeFile(join(home, '.mcp.json'), JSON.stringify({
+    await writeFile(join(home, '.kode.mcp.json'), JSON.stringify({
       mcpServers: {
         remote: { type: 'streamable-http', url: 'https://mcp.example/server?key=secret' },
       },
@@ -379,7 +379,7 @@ describe('desktop config', () => {
       type: 'sse',
     })
 
-    const updated = JSON.parse(await readFile(join(home, '.mcp.json'), 'utf8'))
+    const updated = JSON.parse(await readFile(join(home, '.kode.mcp.json'), 'utf8'))
     expect(updated.mcpServers.playwright).toEqual({
       command: 'npx',
       args: ['@playwright/mcp@latest', '--headless'],
@@ -391,13 +391,13 @@ describe('desktop config', () => {
 
     const afterRemove = await removeMcpServer('playwright')
     expect(afterRemove.some(server => server.name === 'playwright')).toBe(false)
-    const removed = JSON.parse(await readFile(join(home, '.mcp.json'), 'utf8'))
+    const removed = JSON.parse(await readFile(join(home, '.kode.mcp.json'), 'utf8'))
     expect(removed.mcpServers.playwright).toBeUndefined()
   })
 
   it('rejects removing a missing user MCP server', async () => {
     const { home } = await setupClaudeHome()
-    await writeFile(join(home, '.mcp.json'), JSON.stringify({
+    await writeFile(join(home, '.kode.mcp.json'), JSON.stringify({
       mcpServers: {
         existing: { command: 'node', args: ['server.mjs'] },
       },
@@ -410,7 +410,7 @@ describe('desktop config', () => {
 
   it('enables and disables user MCP servers through settings', async () => {
     const { home } = await setupClaudeHome()
-    await writeFile(join(home, '.mcp.json'), JSON.stringify({
+    await writeFile(join(home, '.kode.mcp.json'), JSON.stringify({
       mcpServers: {
         playwright: { command: 'npx', args: ['@playwright/mcp'] },
       },
@@ -428,7 +428,7 @@ describe('desktop config', () => {
     }])
     let settings = JSON.parse(await readFile(join(home, 'settings.json'), 'utf8'))
     expect(settings.disabledMcpServers).toEqual(['playwright'])
-    const mcpConfig = JSON.parse(await readFile(join(home, '.mcp.json'), 'utf8'))
+    const mcpConfig = JSON.parse(await readFile(join(home, '.kode.mcp.json'), 'utf8'))
     expect(mcpConfig.mcpServers.playwright).toEqual({
       command: 'npx',
       args: ['@playwright/mcp'],
@@ -450,7 +450,7 @@ describe('desktop config', () => {
 
   it('rejects enabling or disabling a missing user MCP server', async () => {
     const { home } = await setupClaudeHome()
-    await writeFile(join(home, '.mcp.json'), JSON.stringify({
+    await writeFile(join(home, '.kode.mcp.json'), JSON.stringify({
       mcpServers: {
         existing: { command: 'node', args: ['server.mjs'] },
       },
@@ -469,12 +469,12 @@ describe('desktop config', () => {
     const { home, root } = await setupClaudeHome()
     const project = join(root, 'project')
     await mkdir(project, { recursive: true })
-    await writeFile(join(home, '.mcp.json'), JSON.stringify({
+    await writeFile(join(home, '.kode.mcp.json'), JSON.stringify({
       mcpServers: {
         remote: { type: 'sse', url: 'https://mcp.example/server?key=secret' },
       },
     }))
-    await writeFile(join(project, '.mcp.json'), JSON.stringify({
+    await writeFile(join(project, '.kode.mcp.json'), JSON.stringify({
       mcpServers: {
         project: { command: 'node', args: ['server.mjs'] },
       },
@@ -484,14 +484,14 @@ describe('desktop config', () => {
       name: 'remote',
       type: 'sse',
       url: 'https://mcp.example/server?key=%5Bredacted%5D',
-      sourcePath: join(home, '.mcp.json'),
+      sourcePath: join(home, '.kode.mcp.json'),
       raw: { type: 'sse', url: 'https://mcp.example/server?key=%5Bredacted%5D' },
     })
     expect(await readProjectMcpServer(project, 'project')).toMatchObject({
       name: 'project',
       command: 'node',
       args: ['server.mjs'],
-      sourcePath: join(project, '.mcp.json'),
+      sourcePath: join(project, '.kode.mcp.json'),
       raw: { command: 'node', args: ['server.mjs'] },
     })
     await expect(readProjectMcpServer(project, '../outside')).rejects.toThrow(
@@ -515,10 +515,10 @@ describe('desktop config', () => {
       name: 'project-server',
       command: 'node',
       args: ['server.mjs'],
-      sourcePath: join(project, '.mcp.json'),
+      sourcePath: join(project, '.kode.mcp.json'),
     }])
 
-    const raw = JSON.parse(await readFile(join(project, '.mcp.json'), 'utf8'))
+    const raw = JSON.parse(await readFile(join(project, '.kode.mcp.json'), 'utf8'))
     expect(raw.mcpServers['project-server']).toEqual({
       command: 'node',
       args: ['server.mjs'],
@@ -531,7 +531,7 @@ describe('desktop config', () => {
     const { root } = await setupClaudeHome()
     const project = join(root, 'project')
     await mkdir(project, { recursive: true })
-    await writeFile(join(project, '.mcp.json'), JSON.stringify({
+    await writeFile(join(project, '.kode.mcp.json'), JSON.stringify({
       mcpServers: {
         existing: { command: 'node', args: ['server.mjs'] },
       },
@@ -546,7 +546,7 @@ describe('desktop config', () => {
     const { root } = await setupClaudeHome()
     const project = join(root, 'project')
     await mkdir(project, { recursive: true })
-    await writeFile(join(project, '.mcp.json'), JSON.stringify({
+    await writeFile(join(project, '.kode.mcp.json'), JSON.stringify({
       mcpServers: {
         playwright: { command: 'npx', args: ['@playwright/mcp'] },
       },
@@ -562,7 +562,7 @@ describe('desktop config', () => {
       name: 'playwright',
       approvalStatus: 'approved',
     }])
-    let localSettings = JSON.parse(await readFile(join(project, '.claude/settings.local.json'), 'utf8'))
+    let localSettings = JSON.parse(await readFile(join(project, '.kode/settings.local.json'), 'utf8'))
     expect(localSettings.enabledMcpjsonServers).toEqual(['playwright'])
     expect(localSettings.disabledMcpjsonServers).toEqual([])
 
@@ -571,12 +571,12 @@ describe('desktop config', () => {
       name: 'playwright',
       approvalStatus: 'rejected',
     }])
-    localSettings = JSON.parse(await readFile(join(project, '.claude/settings.local.json'), 'utf8'))
+    localSettings = JSON.parse(await readFile(join(project, '.kode/settings.local.json'), 'utf8'))
     expect(localSettings.enabledMcpjsonServers).toEqual([])
     expect(localSettings.disabledMcpjsonServers).toEqual(['playwright'])
 
     expect(await removeProjectMcpServer(project, 'playwright')).toEqual([])
-    localSettings = JSON.parse(await readFile(join(project, '.claude/settings.local.json'), 'utf8'))
+    localSettings = JSON.parse(await readFile(join(project, '.kode/settings.local.json'), 'utf8'))
     expect(localSettings.enabledMcpjsonServers).toEqual([])
     expect(localSettings.disabledMcpjsonServers).toEqual([])
   })
@@ -585,7 +585,7 @@ describe('desktop config', () => {
     const { root } = await setupClaudeHome()
     const project = join(root, 'project')
     await mkdir(project, { recursive: true })
-    await writeFile(join(project, '.mcp.json'), JSON.stringify({
+    await writeFile(join(project, '.kode.mcp.json'), JSON.stringify({
       mcpServers: {
         existing: { command: 'node', args: ['server.mjs'] },
       },
@@ -597,7 +597,7 @@ describe('desktop config', () => {
     await expect(setProjectMcpServerApproval(project, 'missing', false)).rejects.toThrow(
       'MCP server not found: missing',
     )
-    await expect(readFile(join(project, '.claude/settings.local.json'), 'utf8'))
+    await expect(readFile(join(project, '.kode/settings.local.json'), 'utf8'))
       .rejects
       .toThrow()
   })
@@ -608,13 +608,13 @@ describe('desktop config', () => {
     const outside = join(root, 'outside')
     await mkdir(project, { recursive: true })
     await mkdir(outside, { recursive: true })
-    const outsideMcp = join(outside, '.mcp.json')
+    const outsideMcp = join(outside, '.kode.mcp.json')
     await writeFile(outsideMcp, JSON.stringify({
       mcpServers: {
         secret: { command: 'secret-command' },
       },
     }))
-    await symlink(outsideMcp, join(project, '.mcp.json'))
+    await symlink(outsideMcp, join(project, '.kode.mcp.json'))
 
     await expect(listProjectMcpServers(project)).rejects.toThrow(
       'Workspace file target must not be a symlink:',
@@ -635,18 +635,18 @@ describe('desktop config', () => {
     const { root } = await setupClaudeHome()
     const project = join(root, 'project')
     const outside = join(root, 'outside')
-    await mkdir(join(project, '.claude'), { recursive: true })
+    await mkdir(join(project, '.kode'), { recursive: true })
     await mkdir(outside, { recursive: true })
     const outsideSettings = join(outside, 'settings.local.json')
     await writeFile(outsideSettings, JSON.stringify({
       enabledMcpjsonServers: ['secret'],
     }))
-    await writeFile(join(project, '.mcp.json'), JSON.stringify({
+    await writeFile(join(project, '.kode.mcp.json'), JSON.stringify({
       mcpServers: {
         'project-server': { command: 'node', args: ['server.mjs'] },
       },
     }))
-    await symlink(outsideSettings, join(project, '.claude/settings.local.json'))
+    await symlink(outsideSettings, join(project, '.kode/settings.local.json'))
 
     await expect(setProjectMcpServerApproval(project, 'project-server', true)).rejects.toThrow(
       'Workspace file target must not be a symlink:',

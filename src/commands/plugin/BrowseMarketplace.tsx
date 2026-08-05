@@ -684,7 +684,7 @@ export function BrowseMarketplace({
           // - commands/ directory and list files
           // - agents/ directory and list files
           // - hooks/ directory and list files
-          // - .mcp.json or mcp-servers.json files
+          // - .kode.mcp.json or mcp-servers.json files
           <Text dimColor>
                     · Components will be discovered at installation
                   </Text>}

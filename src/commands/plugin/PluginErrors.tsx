@@ -76,7 +76,7 @@ export function getErrorGuidance(error: PluginError): string | null {
     case 'marketplace-not-found':
       return error.availableMarketplaces.length > 0 ? `Available marketplaces: ${error.availableMarketplaces.join(', ')}` : 'Add the marketplace first using /plugin marketplace add';
     case 'mcp-config-invalid':
-      return 'Check MCP server configuration in .mcp.json or manifest';
+      return 'Check MCP server configuration in .kode.mcp.json or manifest';
     case 'mcp-server-suppressed-duplicate':
       {
         // duplicateOf is "plugin:name:srv" when another plugin won dedup —

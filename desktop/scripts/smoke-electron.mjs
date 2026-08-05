@@ -45,16 +45,16 @@ function commitWorkspaceBaseline(cwd, message) {
 async function setupWorkspace() {
   const cwd = await mkdtemp(join(tmpdir(), 'claude-desktop-e2e-'))
   await mkdir(join(cwd, 'src'), { recursive: true })
-  await mkdir(join(cwd, '.claude/commands'), { recursive: true })
-  await mkdir(join(cwd, '.claude/teams/frontend'), { recursive: true })
+  await mkdir(join(cwd, '.kode/commands'), { recursive: true })
+  await mkdir(join(cwd, '.kode/teams/frontend'), { recursive: true })
   await writeFile(join(cwd, 'src', 'app.txt'), 'hello\n')
   await writeFile(join(cwd, 'src', 'notes.txt'), 'notes\n')
   await writeFile(join(cwd, 'src', 'binary.bin'), Buffer.from([0x63, 0x00, 0x64]))
   await writeFile(
-    join(cwd, '.claude/commands/desktop-smoke.md'),
+    join(cwd, '.kode/commands/desktop-smoke.md'),
     '---\ndescription: Run the desktop smoke custom command\n---\n\nUse the local desktop smoke command.\n',
   )
-  await writeFile(join(cwd, '.claude/teams/frontend/config.json'), JSON.stringify({
+  await writeFile(join(cwd, '.kode/teams/frontend/config.json'), JSON.stringify({
     name: 'frontend',
     description: 'Desktop smoke team',
     backend: 'local',
@@ -135,7 +135,7 @@ async function setupClaudeHome() {
       ANTHROPIC_BASE_URL: 'https://example.invalid/anthropic',
     },
   }, null, 2))
-  await writeFile(join(home, '.mcp.json'), JSON.stringify({
+  await writeFile(join(home, '.kode.mcp.json'), JSON.stringify({
     mcpServers: {
       playwright: { command: 'npx', args: ['@playwright/mcp@latest', '--headless'] },
       remote: { type: 'streamable-http', url: 'https://mcp.example.invalid/server?key=secret' },
@@ -231,7 +231,7 @@ if (process.argv.includes('agents') && process.argv.includes('--json')) {
     console.log(JSON.stringify({
       activeAgents: [],
       allAgents: [],
-      failedFiles: [{ path: '.claude/agents/unreadable-smoke-agent.md', error: 'desktop smoke parse failure' }],
+      failedFiles: [{ path: '.kode/agents/unreadable-smoke-agent.md', error: 'desktop smoke parse failure' }],
     }))
     process.exit(0)
   }
@@ -269,7 +269,7 @@ if (process.argv.includes('agents') && process.argv.includes('--json')) {
         active: false,
         tools: ['Read', 'Edit'],
         model: 'sonnet',
-        baseDir: '.claude/agents',
+        baseDir: '.kode/agents',
       },
     ],
   }))
@@ -711,8 +711,8 @@ const agentRestoreCwd = await setupPlainWorkspace()
 const teammateRestoreCwd = await setupWorkspace(`claude-desktop-e2e-teammate-restore-${randomUUID().slice(0, 8)}`)
 const settingsRestoreCwd = await setupPlainWorkspace()
 const tasksRestoreCwd = await setupPlainWorkspace()
-await mkdir(join(tasksRestoreCwd, '.claude'), { recursive: true })
-await writeFile(join(tasksRestoreCwd, '.claude/scheduled_tasks.json'), JSON.stringify({
+await mkdir(join(tasksRestoreCwd, '.kode'), { recursive: true })
+await writeFile(join(tasksRestoreCwd, '.kode/scheduled_tasks.json'), JSON.stringify({
   tasks: [{
     id: 'project-restore-task',
     cron: '0 10 * * *',
@@ -727,7 +727,7 @@ const installableSkill = await setupInstallableSkill()
 const storeDir = await mkdtemp(join(tmpdir(), 'claude-desktop-store-'))
 const storePath = join(storeDir, 'sessions.json')
 const userDataDir = await mkdtemp(join(tmpdir(), 'claude-desktop-user-data-'))
-const defaultWorkspaceCwd = join(homedir(), '.claude', 'desktop-workspace')
+const defaultWorkspaceCwd = join(homedir(), '.kode', 'desktop-workspace')
 const executablePath = process.env.DESKTOP_SMOKE_EXECUTABLE_PATH || electronPath
 const launchArgs = process.env.DESKTOP_SMOKE_EXECUTABLE_PATH
   ? []
@@ -1979,7 +1979,7 @@ function appEnv() {
     ...process.env,
     CLAUDE_CODE_DESKTOP_CLI_COMMAND: fakeRuntime.runtime,
     CLAUDE_CODE_DESKTOP_CLAUDE_HOME: claudeHome,
-    CLAUDE_CONFIG_DIR: claudeHome,
+    KODE_CONFIG_DIR: claudeHome,
     CLAUDE_CODE_DESKTOP_STORE_PATH: storePath,
     CLAUDE_CODE_DESKTOP_USER_DATA_DIR: userDataDir,
     CLAUDE_CODE_DESKTOP_TASK_SCHEDULER_INTERVAL_MS: '1000',
@@ -2819,7 +2819,7 @@ try {
   await waitFor(page, () => (document.body.textContent ?? '').includes('desktop-smoke-mcp'))
   await assertSettingsStatus(page, 'Saved MCP server.')
   await capture(page, 'settings-mcp')
-  const mcpRaw = JSON.parse(await readFile(join(claudeHome, '.mcp.json'), 'utf8'))
+  const mcpRaw = JSON.parse(await readFile(join(claudeHome, '.kode.mcp.json'), 'utf8'))
   assert(mcpRaw.mcpServers['desktop-smoke-mcp'].command === 'node', 'MCP add did not persist')
   const userMcpInspectBaseline = await app.evaluate(({ app: electronApp }) =>
     electronApp.__claudeDesktopSmokeIpcCalls?.['mcp:read'] ?? 0)
@@ -2838,7 +2838,7 @@ try {
     const text = detail?.textContent ?? ''
     return (
       text.includes('desktop-smoke-mcp') &&
-      text.includes('.mcp.json') &&
+      text.includes('.kode.mcp.json') &&
       text.includes('node') &&
       text.includes('--version')
     )
@@ -2889,7 +2889,7 @@ try {
     userMcpRemoveDebug.calls === 1,
     `rapid user MCP Remove submitted ${userMcpRemoveDebug.calls} deletes: ${JSON.stringify(userMcpRemoveDebug)}`,
   )
-  const mcpRemovedRaw = JSON.parse(await readFile(join(claudeHome, '.mcp.json'), 'utf8'))
+  const mcpRemovedRaw = JSON.parse(await readFile(join(claudeHome, '.kode.mcp.json'), 'utf8'))
   assert(!mcpRemovedRaw.mcpServers['desktop-smoke-mcp'], 'MCP remove did not persist')
 
   await page.getByRole('button', { name: /^Tasks$/ }).click()
@@ -3949,8 +3949,8 @@ try {
   const scheduledNow = new Date()
   const scheduledCreatedAt = new Date(scheduledNow)
   scheduledCreatedAt.setMinutes(scheduledNow.getMinutes() - 1, 0, 0)
-  await mkdir(join(cwd, '.claude'), { recursive: true })
-  await writeFile(join(cwd, '.claude/scheduled_tasks.json'), JSON.stringify({
+  await mkdir(join(cwd, '.kode'), { recursive: true })
+  await writeFile(join(cwd, '.kode/scheduled_tasks.json'), JSON.stringify({
     tasks: [{
       id: 'desktop-auto-task',
       cron: `${scheduledNow.getMinutes()} ${scheduledNow.getHours()} * * *`,
@@ -3962,7 +3962,7 @@ try {
     const text = document.body.textContent ?? ''
     return text.includes('project scheduled task fired automatically')
   }, 20_000)
-  const autoTaskRaw = JSON.parse(await readFile(join(cwd, '.claude/scheduled_tasks.json'), 'utf8'))
+  const autoTaskRaw = JSON.parse(await readFile(join(cwd, '.kode/scheduled_tasks.json'), 'utf8'))
   assert(
     !autoTaskRaw.tasks.some(task => task.id === 'desktop-auto-task'),
     'automatic one-shot scheduled task was not removed after firing',
@@ -4034,9 +4034,9 @@ try {
     'project skill list did not include installed skill',
   )
   assert(
-    (await readFile(join(cwd, '.claude/skills', installedSkillName, 'SKILL.md'), 'utf8'))
+    (await readFile(join(cwd, '.kode/skills', installedSkillName, 'SKILL.md'), 'utf8'))
       .includes('Installed through desktop GUI'),
-    'project skill was not copied into .claude/skills',
+    'project skill was not copied into .kode/skills',
   )
   const projectSkillInspectBaseline = await app.evaluate(({ app: electronApp }) =>
     electronApp.__claudeDesktopSmokeIpcCalls?.['workspaceSkills:read'] ?? 0)
@@ -4062,7 +4062,7 @@ try {
       text.includes(name) &&
       text.includes('Installed through desktop GUI') &&
       text.includes('Smoke inspect body.') &&
-      text.includes('.claude/skills')
+      text.includes('.kode/skills')
     )
   }, 10_000, installedSkillName)
   const projectSkillInspectDebug = await app.evaluate(({ app: electronApp }, baseline) => ({
@@ -4082,7 +4082,7 @@ try {
   await page.getByRole('button', { name: /Save skill/ }).click()
   await assertSettingsStatus(page, `Saved project skill "${savedProjectSkillName}".`)
   assert(
-    (await readFile(join(cwd, '.claude/skills', savedProjectSkillName, 'SKILL.md'), 'utf8'))
+    (await readFile(join(cwd, '.kode/skills', savedProjectSkillName, 'SKILL.md'), 'utf8'))
       .includes('Saved into this workspace from desktop Settings.'),
     'project skill save did not write SKILL.md',
   )
@@ -4127,7 +4127,7 @@ try {
   10_000,
   installedSkillName)
   assert(
-    await readFile(join(cwd, '.claude/skills', installedSkillName, 'SKILL.md'), 'utf8')
+    await readFile(join(cwd, '.kode/skills', installedSkillName, 'SKILL.md'), 'utf8')
       .then(() => false, () => true),
     'project skill directory was not removed',
   )
@@ -4136,7 +4136,7 @@ try {
     return Boolean(
       empty?.querySelector('.glyph') &&
       empty?.querySelector('strong')?.textContent?.includes('No project skills installed') &&
-      empty?.textContent?.includes('.claude/skills'),
+      empty?.textContent?.includes('.kode/skills'),
     )
   })
   progress('checking project scheduled task GUI management')
@@ -4153,7 +4153,7 @@ try {
     return Boolean(
       empty?.querySelector('.glyph') &&
       empty?.querySelector('strong')?.textContent?.includes('No project scheduled tasks') &&
-      empty?.textContent?.includes('.claude/scheduled_tasks.json'),
+      empty?.textContent?.includes('.kode/scheduled_tasks.json'),
     )
   })
   await projectTaskSection.locator('input[placeholder="0 9 * * *"]').fill('not a cron')
@@ -4188,7 +4188,7 @@ try {
     button.click()
     button.click()
   })
-  await waitForFile(join(cwd, '.claude/scheduled_tasks.json'), contents => {
+  await waitForFile(join(cwd, '.kode/scheduled_tasks.json'), contents => {
     const raw = JSON.parse(contents)
     return raw.tasks?.some(task =>
       task.prompt === 'project native cron prompt' &&
@@ -4197,7 +4197,7 @@ try {
   }, 5_000)
   await assertTasksStatus(page, 'Saved project scheduled task.')
   await page.waitForTimeout(200)
-  const projectTasksRaw = JSON.parse(await readFile(join(cwd, '.claude/scheduled_tasks.json'), 'utf8'))
+  const projectTasksRaw = JSON.parse(await readFile(join(cwd, '.kode/scheduled_tasks.json'), 'utf8'))
   const rapidProjectTaskSaveDebug = await app.evaluate(({ app: electronApp }, baseline) => ({
     calls: (electronApp.__claudeDesktopSmokeIpcCalls?.['workspaceTasks:addOrUpdate'] ?? 0) - baseline,
     allCalls: electronApp.__claudeDesktopSmokeIpcCalls ?? {},
@@ -4253,8 +4253,8 @@ try {
     projectTaskPauseDebug.calls === 1,
     `rapid project task Pause submitted ${projectTaskPauseDebug.calls} pauses: ${JSON.stringify(projectTaskPauseDebug)}`,
   )
-  const pausedProjectTasksRaw = JSON.parse(await readFile(join(cwd, '.claude/scheduled_tasks.paused.json'), 'utf8'))
-  const activeProjectTasksAfterPause = JSON.parse(await readFile(join(cwd, '.claude/scheduled_tasks.json'), 'utf8'))
+  const pausedProjectTasksRaw = JSON.parse(await readFile(join(cwd, '.kode/scheduled_tasks.paused.json'), 'utf8'))
+  const activeProjectTasksAfterPause = JSON.parse(await readFile(join(cwd, '.kode/scheduled_tasks.json'), 'utf8'))
   assert(
     pausedProjectTasksRaw.tasks.some(task =>
       task.id === projectTask.id &&
@@ -4301,8 +4301,8 @@ try {
     projectTaskResumeDebug.calls === 1,
     `rapid project task Resume submitted ${projectTaskResumeDebug.calls} resumes: ${JSON.stringify(projectTaskResumeDebug)}`,
   )
-  const pausedProjectTasksAfterResume = JSON.parse(await readFile(join(cwd, '.claude/scheduled_tasks.paused.json'), 'utf8'))
-  const activeProjectTasksAfterResume = JSON.parse(await readFile(join(cwd, '.claude/scheduled_tasks.json'), 'utf8'))
+  const pausedProjectTasksAfterResume = JSON.parse(await readFile(join(cwd, '.kode/scheduled_tasks.paused.json'), 'utf8'))
+  const activeProjectTasksAfterResume = JSON.parse(await readFile(join(cwd, '.kode/scheduled_tasks.json'), 'utf8'))
   assert(
     !pausedProjectTasksAfterResume.tasks.some(task => task.id === projectTask.id),
     'project scheduled task resume did not remove paused sidecar record',
@@ -4432,10 +4432,10 @@ try {
     return Boolean(
       empty?.querySelector('.glyph') &&
       empty?.querySelector('strong')?.textContent?.includes('No project scheduled tasks') &&
-      empty?.textContent?.includes('.claude/scheduled_tasks.json'),
+      empty?.textContent?.includes('.kode/scheduled_tasks.json'),
     )
   })
-  const projectTasksRemovedRaw = JSON.parse(await readFile(join(cwd, '.claude/scheduled_tasks.json'), 'utf8'))
+  const projectTasksRemovedRaw = JSON.parse(await readFile(join(cwd, '.kode/scheduled_tasks.json'), 'utf8'))
   assert(
     !projectTasksRemovedRaw.tasks.some(task => task.prompt === 'project native cron prompt'),
     'project scheduled task remove did not persist',
@@ -4571,7 +4571,7 @@ try {
   await projectMcpSection.getByRole('button', { name: /Add MCP/ }).click()
   await waitFor(page, () => (document.body.textContent ?? '').includes('desktop-project-mcp'))
   await assertSettingsStatus(page, 'Saved MCP server.')
-  const projectMcpRaw = JSON.parse(await readFile(join(cwd, '.mcp.json'), 'utf8'))
+  const projectMcpRaw = JSON.parse(await readFile(join(cwd, '.kode.mcp.json'), 'utf8'))
   assert(
     projectMcpRaw.mcpServers['desktop-project-mcp'].command === 'node',
     'project MCP add did not persist',
@@ -4594,7 +4594,7 @@ try {
     const text = detail?.textContent ?? ''
     return (
       text.includes('desktop-project-mcp') &&
-      text.includes('.mcp.json') &&
+      text.includes('.kode.mcp.json') &&
       text.includes('node') &&
       text.includes('--version')
     )
@@ -4625,7 +4625,7 @@ try {
       .find(item => item.textContent?.includes('desktop-project-mcp'))
     return article?.textContent?.includes('project · approved')
   })
-  let projectMcpLocalSettings = JSON.parse(await readFile(join(cwd, '.claude/settings.local.json'), 'utf8'))
+  let projectMcpLocalSettings = JSON.parse(await readFile(join(cwd, '.kode/settings.local.json'), 'utf8'))
   assert(
     projectMcpLocalSettings.enabledMcpjsonServers?.includes('desktop-project-mcp'),
     'project MCP approve did not persist enabledMcpjsonServers',
@@ -4637,7 +4637,7 @@ try {
       .find(item => item.textContent?.includes('desktop-project-mcp'))
     return article?.textContent?.includes('project · rejected')
   })
-  projectMcpLocalSettings = JSON.parse(await readFile(join(cwd, '.claude/settings.local.json'), 'utf8'))
+  projectMcpLocalSettings = JSON.parse(await readFile(join(cwd, '.kode/settings.local.json'), 'utf8'))
   assert(
     projectMcpLocalSettings.disabledMcpjsonServers?.includes('desktop-project-mcp') &&
       !(projectMcpLocalSettings.enabledMcpjsonServers ?? []).includes('desktop-project-mcp'),
@@ -4688,14 +4688,14 @@ try {
     projectMcpRemoveDebug.calls === 1,
     `rapid project MCP Remove submitted ${projectMcpRemoveDebug.calls} deletes: ${JSON.stringify(projectMcpRemoveDebug)}`,
   )
-  const projectMcpRemovedRaw = JSON.parse(await readFile(join(cwd, '.mcp.json'), 'utf8'))
+  const projectMcpRemovedRaw = JSON.parse(await readFile(join(cwd, '.kode.mcp.json'), 'utf8'))
   assert(!projectMcpRemovedRaw.mcpServers['desktop-project-mcp'], 'project MCP remove did not persist')
   await waitFor(page, () => {
     const empty = document.querySelector('#settings-mcp .settings-empty-state')
     return Boolean(
       empty?.querySelector('.glyph') &&
       empty?.querySelector('strong')?.textContent?.includes('No project MCP servers') &&
-      empty?.textContent?.includes('.mcp.json'),
+      empty?.textContent?.includes('.kode.mcp.json'),
     )
   })
 
@@ -4893,7 +4893,7 @@ try {
     agentSaveDebug.calls === 1,
     `rapid Save agent submitted ${agentSaveDebug.calls} saves: ${JSON.stringify(agentSaveDebug)}`,
   )
-  const savedAgentPath = join(cwd, '.claude/agents/desktop-ui-agent.md')
+  const savedAgentPath = join(cwd, '.kode/agents/desktop-ui-agent.md')
   const savedAgentMarkdown = await waitForFile(
     savedAgentPath,
     contents => contents.includes('Operate from the desktop editor smoke test.'),
@@ -7898,7 +7898,7 @@ try {
   }, {
     workspace: settingsRestoreCwd,
     primarySessionId: result.sessionId,
-    mcpSourcePath: join(claudeHome, '.mcp.json'),
+    mcpSourcePath: join(claudeHome, '.kode.mcp.json'),
     skillPath: join(claudeHome, 'skills/existing-skill'),
   })
   const globalRestoreTaskId = await page.evaluate(async () => {
@@ -8211,7 +8211,7 @@ try {
     'settings grouped section was not restored',
   )
   assert(settingsRestoreState.selectedMcpName === 'playwright', 'selected MCP name was not restored')
-  assert(settingsRestoreState.selectedMcpSourcePath?.endsWith('/.mcp.json'), 'selected MCP source path was not restored')
+  assert(settingsRestoreState.selectedMcpSourcePath?.endsWith('/.kode.mcp.json'), 'selected MCP source path was not restored')
   assert(settingsRestoreState.selectedMcpScope === 'project', 'selected MCP scope was not restored')
   assert(settingsRestoreState.selectedSkillName === 'existing-skill', 'selected skill name was not restored')
   assert(settingsRestoreState.selectedSkillPath?.endsWith('/skills/existing-skill'), 'selected skill path was not restored')

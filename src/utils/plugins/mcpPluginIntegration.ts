@@ -126,7 +126,7 @@ async function loadMcpServersFromMcpb(
 /**
  * Load MCP servers from a plugin's manifest
  * This function loads MCP server configurations from various sources within the plugin
- * including manifest entries, .mcp.json files, and .mcpb files
+ * including manifest entries, .kode.mcp.json files, and .mcpb files
  */
 export async function loadPluginMcpServers(
   plugin: LoadedPlugin,
@@ -134,10 +134,10 @@ export async function loadPluginMcpServers(
 ): Promise<Record<string, McpServerConfig> | undefined> {
   let servers: Record<string, McpServerConfig> = {}
 
-  // Check for .mcp.json in plugin directory first (lowest priority)
+  // Check for .kode.mcp.json in plugin directory first (lowest priority)
   const defaultMcpServers = await loadMcpServersFromFile(
     plugin.path,
-    '.mcp.json',
+    '.kode.mcp.json',
   )
   if (defaultMcpServers) {
     servers = { ...servers, ...defaultMcpServers }
@@ -239,7 +239,7 @@ async function loadMcpServersFromFile(
   try {
     const parsed = jsonParse(content)
 
-    // Check if it's in the .mcp.json format with mcpServers key
+    // Check if it's in the .kode.mcp.json format with mcpServers key
     const mcpServers = parsed.mcpServers || parsed
 
     // Validate each server config

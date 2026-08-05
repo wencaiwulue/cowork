@@ -6,7 +6,7 @@ import type { AgentMcpServerInfo } from '../../components/mcp/types.js'
 import type { Tool } from '../../Tool.js'
 import type { AgentDefinition } from '../../tools/AgentTool/loadAgentsDir.js'
 import { getCwd } from '../../utils/cwd.js'
-import { getGlobalClaudeFile } from '../../utils/env.js'
+import { getKodeGlobalFile } from '../../utils/env.js'
 import { isSettingSourceEnabled } from '../../utils/settings/constants.js'
 import {
   getSettings_DEPRECATED,
@@ -150,7 +150,7 @@ export function excludeResourcesByServer(
 
 /**
  * Stable hash of an MCP server config for change detection on /reload-plugins.
- * Excludes `scope` (provenance, not content — moving a server from .mcp.json
+ * Excludes `scope` (provenance, not content — moving a server from .kode.mcp.json
  * to settings.json shouldn't reconnect it). Keys sorted so `{a:1,b:2}` and
  * `{b:2,a:1}` hash the same.
  */
@@ -172,7 +172,7 @@ export function hashMcpConfig(config: ScopedMcpServerConfig): string {
  * Remove stale MCP clients and their tools/commands/resources. A client is
  * stale if:
  *   - scope 'dynamic' and name no longer in configs (plugin disabled), or
- *   - config hash changed (args/url/env edited in .mcp.json) — any scope
+ *   - config hash changed (args/url/env edited in .kode.mcp.json) — any scope
  *
  * The removal case is scoped to 'dynamic' so /reload-plugins can't
  * accidentally disconnect a user-configured server that's just temporarily
@@ -263,11 +263,11 @@ export function isMcpCommand(command: Command): boolean {
 export function describeMcpConfigFilePath(scope: ConfigScope): string {
   switch (scope) {
     case 'user':
-      return getGlobalClaudeFile()
+      return getKodeGlobalFile()
     case 'project':
-      return join(getCwd(), '.mcp.json')
+      return join(getCwd(), '.kode.mcp.json')
     case 'local':
-      return `${getGlobalClaudeFile()} [project: ${getCwd()}]`
+      return `${getKodeGlobalFile()} [project: ${getCwd()}]`
     case 'dynamic':
       return 'Dynamically configured'
     case 'enterprise':
@@ -284,7 +284,7 @@ export function getScopeLabel(scope: ConfigScope): string {
     case 'local':
       return 'Local config (private to you in this project)'
     case 'project':
-      return 'Project config (shared via .mcp.json)'
+      return 'Project config (shared via .kode.mcp.json)'
     case 'user':
       return 'User config (available in all your projects)'
     case 'dynamic':
@@ -378,7 +378,7 @@ export function getProjectMcpServerStatus(
   // the user has explicitly chosen to bypass all permission checks.
   // SECURITY: We intentionally only check skipDangerousModePermissionPrompt via
   // hasSkipDangerousModePermissionPrompt(), which reads from userSettings/localSettings/
-  // flagSettings/policySettings but NOT projectSettings (repo-level .claude/settings.json).
+  // flagSettings/policySettings but NOT projectSettings (repo-level .kode/settings.json).
   // This is intentional: a repo should not be able to accept the bypass dialog on behalf of
   // users. We also do NOT check getSessionBypassPermissionsMode() here because
   // sessionBypassPermissionsMode can be set from project settings before the dialog is shown,

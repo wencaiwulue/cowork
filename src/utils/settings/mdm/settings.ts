@@ -2,10 +2,10 @@
  * MDM (Mobile Device Management) profile enforcement for Claude Code managed settings.
  *
  * Reads enterprise settings from OS-level MDM configuration:
- * - macOS: `com.anthropic.claudecode` preference domain
+ * - macOS: `com.anthropic.kodecode` preference domain
  *   (MDM profiles at /Library/Managed Preferences/ only — not user-writable ~/Library/Preferences/)
- * - Windows: `HKLM\SOFTWARE\Policies\ClaudeCode` (admin-only)
- *   and `HKCU\SOFTWARE\Policies\ClaudeCode` (user-writable, lowest priority)
+ * - Windows: `HKLM\SOFTWARE\Policies\KodeCode` (admin-only)
+ *   and `HKCU\SOFTWARE\Policies\KodeCode` (user-writable, lowest priority)
  * - Linux: No MDM equivalent (uses /etc/claude-code/managed-settings.json instead)
  *
  * Policy settings use "first source wins" — the highest-priority source that exists
@@ -26,7 +26,7 @@ import { getFsImplementation } from '../../fsOperations.js'
 import { safeParseJSON } from '../../json.js'
 import { profileCheckpoint } from '../../startupProfiler.js'
 import {
-  getManagedFilePath,
+  getKodeManagedFilePath,
   getManagedSettingsDropInDir,
 } from '../managedPath.js'
 import { type SettingsJson, SettingsSchema } from '../types.js'
@@ -279,7 +279,7 @@ function consumeRawReadResult(raw: RawReadResult): {
  */
 function hasManagedSettingsFile(): boolean {
   try {
-    const filePath = join(getManagedFilePath(), 'managed-settings.json')
+    const filePath = join(getKodeManagedFilePath(), 'managed-settings.json')
     const content = readFileSync(filePath)
     const data = safeParseJSON(content, false)
     if (data && typeof data === 'object' && Object.keys(data).length > 0) {

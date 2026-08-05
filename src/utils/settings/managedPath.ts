@@ -5,7 +5,7 @@ import { getPlatform } from '../platform.js'
 /**
  * Get the path to the managed settings directory based on the current platform.
  */
-export const getManagedFilePath = memoize(function (): string {
+export const getKodeManagedFilePath = memoize(function (): string {
   // Allow override for testing/demos (Ant-only, eliminated from external builds)
   if (
     process.env.USER_TYPE === 'ant' &&
@@ -16,11 +16,11 @@ export const getManagedFilePath = memoize(function (): string {
 
   switch (getPlatform()) {
     case 'macos':
-      return '/Library/Application Support/ClaudeCode'
+      return '/Library/Application Support/KodeCode'
     case 'windows':
-      return 'C:\\Program Files\\ClaudeCode'
+      return 'C:\\Program Files\\KodeCode'
     default:
-      return '/etc/claude-code'
+      return '/etc/kode-code'
   }
 })
 
@@ -30,5 +30,5 @@ export const getManagedFilePath = memoize(function (): string {
  * are merged alphabetically on top (drop-ins override base, later files win).
  */
 export const getManagedSettingsDropInDir = memoize(function (): string {
-  return join(getManagedFilePath(), 'managed-settings.d')
+  return join(getKodeManagedFilePath(), 'managed-settings.d')
 })
