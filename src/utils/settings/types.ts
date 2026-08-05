@@ -16,9 +16,7 @@ export {
   type AgentHook,
   type BashCommandHook,
   type HookCommand,
-  HookCommandSchema,
   type HookMatcher,
-  HookMatcherSchema,
   HooksSchema,
   type HooksSettings,
   type HttpHook,
@@ -63,7 +61,16 @@ export const PermissionsSchema = lazySchema(() =>
             : EXTERNAL_PERMISSION_MODES,
         )
         .optional()
-        .describe('Default permission mode when Claude Code needs access'),
+        .describe(
+          'Default permission mode when Claude Code needs access. ' +
+            'Allowed values (from EXTERNAL_PERMISSION_MODES in src/types/permissions.ts): ' +
+            '"acceptEdits" (auto-accept file edits), "bypassPermissions" (skip all prompts), ' +
+            '"default" (prompt for each tool), "dontAsk" (do not prompt), "plan" (plan-only, no execution). ' +
+            'Additionally, "auto" (AI-classified approvals) is available only when the ' +
+            "TRANSCRIPT_CLASSIFIER feature flag is enabled (feature('TRANSCRIPT_CLASSIFIER')); " +
+            '"bubble" is internal-only and NOT user-addressable. ' +
+            'Also configurable via the --permission-mode CLI flag.',
+        ),
       disableBypassPermissionsMode: z
         .enum(['disable'])
         .optional()
@@ -209,6 +216,26 @@ export const DeniedMcpServerEntrySchema = lazySchema(() =>
 /**
  * Unified schema for settings files
  *
+ * ⚠️ SETTINGS MERGE ORDER (low → high precedence) ⚠️
+ * Sources are merged in `loadSettingsFromDisk` (src/utils/settings/settings.ts)
+ * via `lodash.mergeWith` deep merge. Later sources override earlier ones.
+ * The real, code-verified order is:
+ *
+ *     plugin → user → project → local → flag → policy
+ *
+ * Therefore **policy (managed/enterprise) settings have the HIGHEST precedence**,
+ * flag (CLI/SDK `--settings`) is second-highest, and plugin settings form the
+ * lowest-precedence base (allowlisted fields only, via `getPluginSettingsBase()`).
+ *
+ * NOTE: This corrects an inconsistency in the design doc
+ * `docs/design/2026-08-05-config-reference-and-schema.md` (§3.2 lists
+ * `plugin→user→project→local→policy→flag`, §3.3 lists `flag > policy`).
+ * Authoritative sources: `SETTING_SOURCES` in `src/utils/settings/constants.ts`
+ * and `allowedSettingSources` default in `src/bootstrap/state.ts`
+ * (`['userSettings','projectSettings','localSettings','flagSettings','policySettings']`).
+ * Within `policySettings`, "first source wins":
+ * remote managed > HKLM/macOS plist > managed-settings.json + drop-ins > Windows HKCU.
+ *
  * ⚠️ BACKWARD COMPATIBILITY NOTICE ⚠️
  *
  * This schema defines the structure of user settings files (.kode/settings.json).
@@ -238,6 +265,13 @@ export const DeniedMcpServerEntrySchema = lazySchema(() =>
  * - Type coercion via z.coerce (e.g., env vars convert numbers to strings)
  * - .passthrough() preserves unknown fields in permissions object
  * - Invalid settings are simply not used, but remain in the file to be fixed by the user
+ *
+ * ⚠️ DEFAULTS POLICY ⚠️
+ * This schema intentionally does NOT use `.default()`. Defaults live in
+ * `createDefaultGlobalConfig` (src/utils/config.ts) and per-loader runtime code.
+ * Adding `.default()` here would change multi-source merge semantics (a present
+ * default can shadow a higher-precedence source's explicit value in some merge
+ * branches). Only `.describe()` is used to surface default values in prose.
  */
 
 /**
@@ -360,8 +394,9 @@ export const SettingsSchema = lazySchema(() =>
         .boolean()
         .optional()
         .describe(
-          'Deprecated: Use attribution instead. ' +
-            "Whether to include Claude's co-authored by attribution in commits and PRs (defaults to true)",
+          '[已废弃] Use `attribution` instead. ' +
+            "Whether to include Claude's co-authored by attribution in commits and PRs (defaults to true). " +
+            'Kept for backward compatibility; superseded by the `attribution` block.',
         ),
       includeGitInstructions: z
         .boolean()
@@ -652,7 +687,14 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           'Skip the WebFetch blocklist check for enterprise environments with restrictive security policies',
         ),
-      sandbox: SandboxSettingsSchema().optional(),
+      sandbox: SandboxSettingsSchema()
+        .optional()
+        .describe(
+          'Sandbox configuration for bash command isolation (network, filesystem, auto-allow). ' +
+            'Sub-fields: enabled, failIfUnavailable, autoAllowBashIfSandboxed, allowUnsandboxedCommands, ' +
+            'network, filesystem, ignoreViolations, enableWeakerNestedSandbox, enableWeakerNetworkIsolation, ' +
+            'excludedCommands, ripgrep. See src/entrypoints/sandboxTypes.ts for the full sub-schema.',
+        ),
       feedbackSurveyRate: z
         .number()
         .min(0)
@@ -708,7 +750,10 @@ export const SettingsSchema = lazySchema(() =>
         )
         .optional()
         .catch(undefined)
-        .describe('Persisted effort level for supported models.'),
+        .describe(
+          'Persisted effort level for supported models. Allowed values: "low" | "medium" | "high" ' +
+            '(ant internal builds also allow "max").',
+        ),
       advisorModel: z
         .string()
         .optional()
@@ -992,7 +1037,13 @@ export const SettingsSchema = lazySchema(() =>
                 ...(process.env.USER_TYPE === 'ant'
                   ? {
                       // Back-compat alias for ant users; external users use soft_deny
-                      deny: z.array(z.string()).optional(),
+                      deny: z
+                        .array(z.string())
+                        .optional()
+                        .describe(
+                          '[已废弃] Back-compat alias for ant users; use `soft_deny` instead. ' +
+                            'External users should use soft_deny.',
+                        ),
                     }
                   : {}),
                 environment: z

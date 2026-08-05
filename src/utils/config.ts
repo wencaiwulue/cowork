@@ -23,6 +23,7 @@ import { writeFileSyncAndFlush_DEPRECATED } from './file.js'
 import { getFsImplementation } from './fsOperations.js'
 import { findCanonicalGitRoot } from './git.js'
 import { safeParseJSON } from './json.js'
+import { GlobalConfigSchema } from './configSchema.js'
 import { stripBOM } from './jsonRead.js'
 import * as lockfile from './lockfile.js'
 import { logError } from './log.js'
@@ -623,6 +624,8 @@ function createDefaultGlobalConfig(): GlobalConfig {
 }
 
 export const DEFAULT_GLOBAL_CONFIG: GlobalConfig = createDefaultGlobalConfig()
+
+export { GlobalConfigSchema } from './configSchema.js'
 
 export const GLOBAL_CONFIG_KEYS = [
   'apiKeyHelper',
@@ -1437,6 +1440,15 @@ function getConfig<A>(
     try {
       // Strip BOM before parsing - PowerShell 5.x adds BOM to UTF-8 files
       const parsedConfig = jsonParse(stripBOM(fileContent))
+      // Fail-open schema validation: log-only, never throws, return value unchanged.
+      // See docs/design/2026-08-05-config-reference-and-schema.md §B2.
+      const zr = GlobalConfigSchema().safeParse(parsedConfig)
+      if (!zr.success) {
+        logForDebugging(
+          `GlobalConfig schema validation failed: ${JSON.stringify(zr.error.issues)}`,
+          { level: 'debug' },
+        )
+      }
       return {
         ...createDefault(),
         ...parsedConfig,

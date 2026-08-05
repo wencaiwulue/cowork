@@ -24,6 +24,12 @@
 |------|------|------|
 | [RPC 活动追踪实现](./technical/RPC-TRACING.md) | JSON-RPC 消息捕获机制和UI实现 | 中文 |
 
+### ⚙️ 配置参考
+
+| 文档 | 说明 | 语言 |
+|------|------|------|
+| [配置参数参考](./config/README.md) | Kode Code 五大配置面(`.kode/settings.json`、`.kode.mcp.json`、`~/.kode.json`、`KODE.md`、CLI flags)字段、默认值、合并优先级 | 中文 |
+
 ---
 
 ## 快速链接
