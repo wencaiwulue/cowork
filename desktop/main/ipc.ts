@@ -1,3 +1,33 @@
+// Mirror of MigrationSourceInfo / MigrationResult from src/migrations/importConfig.ts.
+// Re-declared here (desktop main cannot import src/) so the IPC layer can type
+// the new migration channels. See docs/design/2026-08-08-migration-wizard.md §5.3.
+export type MigrationSource = 'claude' | 'codex'
+
+export interface MigrationItem {
+  description: string
+  sourcePath: string
+  destPath: string
+  itemCount: number
+}
+
+export interface MigrationSourceInfo {
+  source: MigrationSource
+  label: string
+  homeDir: string
+  globalFile?: string
+  exists: boolean
+  items: MigrationItem[]
+  totalItemCount: number
+}
+
+export interface MigrationResult {
+  source: MigrationSource
+  ok: boolean
+  migratedItems: string[]
+  skippedItems: { path: string; reason: string }[]
+  warnings: string[]
+}
+
 export const desktopChannels = [
   'app:ready',
   'app:closeWindow',
@@ -82,6 +112,9 @@ export const desktopChannels = [
   'teams:shutdown',
   'teams:removeMember',
   'teams:delete',
+  'migration:getSources',
+  'migration:perform',
+  'migration:skip',
 ] as const
 
 export type DesktopChannel = (typeof desktopChannels)[number]
@@ -417,6 +450,18 @@ export function validateIpcArgs(
         expectStringArg(channel, args, 0, 'cwd'),
         expectNonEmptyStringArg(channel, args, 1, 'agentType'),
       ]
+    case 'migration:getSources':
+      return expectArity(channel, args, 0)
+    case 'migration:perform': {
+      const [source] = expectArity(channel, args, 1)
+      const validated = assertString(channel, 'source', source)
+      if (validated !== 'claude' && validated !== 'codex') {
+        throw new Error(`${channel} source must be claude or codex`)
+      }
+      return [validated]
+    }
+    case 'migration:skip':
+      return expectArity(channel, args, 0)
     case 'app:ready':
       return expectArity(channel, args, 0)
   }

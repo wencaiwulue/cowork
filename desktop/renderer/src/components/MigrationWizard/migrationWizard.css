@@ -1,0 +1,237 @@
+/* First-run migration wizard modal.
+   Reuses the existing `.modal-backdrop` + `.confirmation-modal` shells
+   (see desktop/renderer/src/styles.css L2616 / L2773) and only adds
+   wizard-specific layout for the source list, item details, and result. */
+
+.migration-wizard {
+  width: min(620px, 100%);
+}
+
+.migration-wizard-subtitle {
+  margin: 4px 0 16px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.migration-source-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.migration-source-list li {
+  min-width: 0;
+}
+
+.migration-source-card {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 28px;
+  align-items: start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.migration-source-card:hover {
+  border-color: rgba(69, 107, 176, 0.4);
+}
+
+.migration-source-card.selected {
+  border-color: #456bb0;
+  background: #f4f6ff;
+}
+
+.migration-source-card.selected .migration-source-radio {
+  color: #456bb0;
+}
+
+.migration-source-radio {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  border: 1px solid var(--hairline);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.migration-source-meta {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.migration-source-meta strong {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.migration-source-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.migration-source-count {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.migration-source-expand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-top: -2px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.migration-source-expand:hover {
+  color: var(--text);
+  background: rgba(36, 33, 29, 0.06);
+}
+
+.migration-item-list {
+  grid-column: 2 / 4;
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  background: var(--surface);
+  display: grid;
+  gap: 4px;
+}
+
+.migration-item {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.migration-item-description {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.migration-item-count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.migration-wizard-status {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.migration-wizard-status.error {
+  border-color: rgba(186, 74, 57, 0.3);
+  background: #fff2ed;
+  color: var(--text);
+}
+
+.migration-wizard-status.error span {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.migration-wizard-status.error button {
+  justify-self: end;
+}
+
+.migration-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(36, 33, 29, 0.18);
+  border-top-color: #456bb0;
+  border-radius: 50%;
+  animation: migration-wizard-spin 0.8s linear infinite;
+}
+
+@keyframes migration-wizard-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.migration-wizard-result {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.migration-wizard-result p {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.migration-wizard-details {
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  background: var(--surface-2);
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.migration-wizard-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.migration-wizard-details ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+.migration-wizard-details code {
+  font-family: var(--mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+[data-theme='dark'] .migration-source-card.selected,
+[data-theme='dark'] .migration-wizard-status.error {
+  background: rgba(69, 107, 176, 0.18);
+}

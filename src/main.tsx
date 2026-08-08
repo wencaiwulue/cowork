@@ -21,7 +21,7 @@ startKeychainPrefetch();
 import { feature } from 'bun:bundle';
 import { Command as CommanderCommand, InvalidArgumentError, Option } from '@commander-js/extra-typings';
 import chalk from 'chalk';
-import { readFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import mapValues from 'lodash-es/mapValues.js';
 import pickBy from 'lodash-es/pickBy.js';
 import uniqBy from 'lodash-es/uniqBy.js';
@@ -50,6 +50,7 @@ import { count, uniq } from './utils/array.js';
 import { installAsciicastRecorder } from './utils/asciicast.js';
 import { getSubscriptionType, isClaudeAISubscriber, prefetchAwsCredentialsAndBedRockInfoIfSafe, prefetchGcpCredentialsIfSafe, validateForceLoginOrg } from './utils/auth.js';
 import { checkHasTrustDialogAccepted, getGlobalConfig, getRemoteControlAtStartup, isAutoUpdaterDisabled, saveGlobalConfig } from './utils/config.js';
+import { getKodeGlobalFile } from './utils/env.js';
 import { seedEarlyInput, stopCapturingEarlyInput } from './utils/earlyInput.js';
 import { getInitialEffortSetting, parseEffortValue } from './utils/effort.js';
 import { getInitialFastModeSetting, isFastModeEnabled, prefetchFastModeStatus, resolveFastModeStatusFromCache } from './utils/fastMode.js';
@@ -79,7 +80,7 @@ const coordinatorModeModule = feature('COORDINATOR_MODE') ? require('./coordinat
 /* eslint-disable @typescript-eslint/no-require-imports */
 const assistantModule = feature('KAIROS') ? require('./assistant/index.js') as typeof import('./assistant/index.js') : null;
 const kairosGate = feature('KAIROS') ? require('./assistant/gate.js') as typeof import('./assistant/gate.js') : null;
-import { relative, resolve } from 'path';
+import { dirname, relative, resolve } from 'path';
 import { isAnalyticsDisabled } from 'src/services/analytics/config.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js';
 import { type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS, logEvent } from 'src/services/analytics/index.js';
@@ -175,7 +176,9 @@ import { migrateAutoUpdatesToSettings } from './migrations/migrateAutoUpdatesToS
 import { migrateBypassPermissionsAcceptedToSettings } from './migrations/migrateBypassPermissionsAcceptedToSettings.js';
 import { migrateEnableAllProjectMcpServersToSettings } from './migrations/migrateEnableAllProjectMcpServersToSettings.js';
 import { migrateFennecToOpus } from './migrations/migrateFennecToOpus.js';
+import { detectMigrationSources, performMigration, type MigrationSource } from './migrations/importConfig.js';
 import { migrateFromClaudeToKode } from './migrations/migrateFromClaudeToKode.js';
+import { promptMigrationChoice } from './migrations/migrationPrompt.js';
 import { migrateLegacyOpusToCurrent } from './migrations/migrateLegacyOpusToCurrent.js';
 import { migrateOpusToOpus1m } from './migrations/migrateOpusToOpus1m.js';
 import { migrateReplBridgeEnabledToRemoteControlAtStartup } from './migrations/migrateReplBridgeEnabledToRemoteControlAtStartup.js';
@@ -324,8 +327,92 @@ async function logStartupTelemetry(): Promise<void> {
 // @[MODEL LAUNCH]: Consider any migrations you may need for model strings. See migrateSonnet1mToSonnet45.ts for an example.
 // Bump this when adding a new sync migration so existing users re-run the set.
 const CURRENT_MIGRATION_VERSION = 12;
-function runMigrations(): void {
-  migrateFromClaudeToKode();
+// Records the wizard's decision when it ran this session (set by
+// runMigrationWizard, read by runMigrations). `null` means the wizard did
+// not run (file already existed with migrationPromptSeen=true, or no sources
+// were detected).
+let migrationDecisionThisSession: MigrationSource | 'skip' | null = null;
+
+/**
+ * Phase 1 of the first-run migration wizard: detect sources, prompt the user
+ * (or auto-skip when non-interactive), perform the chosen import, and write a
+ * minimal ~/.kode.json when skipping so the gate never re-fires.
+ *
+ * MUST run before `await init()` in preAction. init() calls
+ * recordFirstStartTime() (src/entrypoints/init.ts:132), which writes
+ * ~/.kode.json via saveGlobalConfig on a true first run; if the wizard ran
+ * AFTER init, the existence gate (`!existsSync(~/.kode.json)`) would already
+ * be false and the wizard would never fire. Running the wizard BEFORE init
+ * also means performMigration('claude') copies ~/.claude.json -> ~/.kode.json
+ * before init's recordFirstStartTime reads it, so firstStartTime lands on the
+ * real (migrated) config instead of an empty default. See
+ * docs/design/2026-08-08-migration-wizard.md §3.3 "Order inside runMigrations"
+ * — the design doc placed this inside runMigrations(), but the init() write
+ * hazard requires it to run before init() instead. This is a documented
+// deviation from the design doc's placement, made necessary by init()'s
+// recordFirstStartTime() side effect (see deviation note in the report).
+ */
+async function runMigrationWizard(): Promise<void> {
+  const kodeGlobalFile = getKodeGlobalFile();
+  // Gate: only fire on a true first run (~/.kode.json absent). After the
+  // wizard writes the file (or init does, on subsequent runs), this is false.
+  if (existsSync(kodeGlobalFile)) return;
+
+  const detectedSources = detectMigrationSources();
+  const available = detectedSources.filter(s => s.exists && s.totalItemCount > 0);
+  if (available.length === 0) return;
+
+  if (getIsNonInteractiveSession()) {
+    // Non-interactive first run: do not block on a prompt. Skip and write a
+    // minimal ~/.kode.json so the gate never re-fires on the next launch.
+    writeMinimalKodeJson(kodeGlobalFile);
+    migrationDecisionThisSession = 'skip';
+    return;
+  }
+
+  const choice = await promptMigrationChoice(available);
+  if (choice === 'skip') {
+    writeMinimalKodeJson(kodeGlobalFile);
+    migrationDecisionThisSession = 'skip';
+  } else {
+    performMigration(choice);
+    migrationDecisionThisSession = choice;
+  }
+}
+
+/**
+ * Write a minimal ~/.kode.json containing just { "migrationPromptSeen": true }
+ * so the first-run gate (existence of ~/.kode.json) never re-fires when the
+ * user skips or when running non-interactively. saveGlobalConfig later merges
+ * migratedFrom + defaults on top of this file. Best-effort: never throws.
+ */
+function writeMinimalKodeJson(path: string, migratedFrom?: MigrationSource | 'none'): void {
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    const payload: Record<string, unknown> = { migrationPromptSeen: true };
+    if (migratedFrom !== undefined) {
+      payload['migratedFrom'] = migratedFrom;
+    }
+    writeFileSync(path, JSON.stringify(payload, null, 2));
+  } catch (err) {
+    logForDebugging(
+      `writeMinimalKodeJson failed: ${err instanceof Error ? err.message : String(err)}`,
+      { level: 'debug' },
+    );
+  }
+}
+
+async function runMigrations(): Promise<void> {
+  // Legacy Claude importer. Only run when the wizard did NOT take a path this
+  // session (wizard sets migrationDecisionThisSession when it fires). For the
+  // claude choice, runMigrationWizard already called performMigration('claude')
+  // and the existence guard inside migrateFromClaudeToKode no-ops; for codex /
+  // skip we MUST NOT run it, or it would override the user's choice by copying
+  // Claude sources against their decision.
+  if (migrationDecisionThisSession === null) {
+    migrateFromClaudeToKode();
+  }
+
   if (getGlobalConfig().migrationVersion !== CURRENT_MIGRATION_VERSION) {
     migrateAutoUpdatesToSettings();
     migrateBypassPermissionsAcceptedToSettings();
@@ -347,6 +434,21 @@ function runMigrations(): void {
       migrationVersion: CURRENT_MIGRATION_VERSION
     });
   }
+
+  // Phase 2: stamp the wizard decision into ~/.kode.json. Runs after init() /
+  // getGlobalConfig() so saveGlobalConfig merges against the real (possibly
+  // just-copied) file instead of the memoized default. Only fires when the
+  // wizard actually ran this session.
+  if (migrationDecisionThisSession !== null) {
+    saveGlobalConfig(c => ({
+      ...c,
+      migratedFrom: migrationDecisionThisSession === 'skip'
+        ? 'none'
+        : migrationDecisionThisSession,
+      migrationPromptSeen: true,
+    }));
+  }
+
   // Async migration - fire and forget since it's non-blocking
   migrateChangelogFromConfig().catch(() => {
     // Silently ignore migration errors - will retry on next startup
@@ -804,6 +906,38 @@ export async function main() {
   const hasSdkUrl = cliArgs.some(arg => arg.startsWith('--sdk-url'));
   const isNonInteractive = hasPrintFlag || hasInitOnlyFlag || hasSdkUrl || !process.stdout.isTTY;
 
+  // Hidden migration-wizard flags — short-circuit BEFORE Commander builds,
+  // preAction, and any early-input capture. Desktop spawns the CLI with these
+  // flags to reuse src/migrations/importConfig.ts without importing src/ from
+  // the desktop bundle (see docs/design/2026-08-08-migration-wizard.md §3.3).
+  if (cliArgs.includes('--list-migration-sources')) {
+    process.stdout.write(JSON.stringify(detectMigrationSources()) + '\n');
+    process.exit(0);
+  }
+  {
+    const idx = cliArgs.indexOf('--perform-migration');
+    if (idx !== -1) {
+      const raw = cliArgs[idx + 1];
+      const source: MigrationSource = raw === 'codex' ? 'codex' : 'claude';
+      const result = performMigration(source);
+      // Migration gate: ensure ~/.kode.json exists so the first-run wizard
+      // never re-fires after a non-claude migration. performMigration('claude')
+      // already copies ~/.claude.json -> ~/.kode.json; performMigration('codex')
+      // only writes ~/.kode/KODE.md + imported-codex/, leaving the gate file
+      // absent. If the file is still missing after migration, stamp a minimal
+      // ~/.kode.json with migrationPromptSeen + migratedFrom. Do NOT call
+      // saveGlobalConfig here — this hidden flag short-circuits before
+      // Commander/preAction/init(), where config loading is unavailable. See
+      // docs/design/2026-08-08-migration-wizard.md §3.3.
+      const kodeGlobalFile = getKodeGlobalFile();
+      if (!existsSync(kodeGlobalFile)) {
+        writeMinimalKodeJson(kodeGlobalFile, source);
+      }
+      process.stdout.write(JSON.stringify(result) + '\n');
+      process.exit(0);
+    }
+  }
+
   // Stop capturing early input for non-interactive modes
   if (isNonInteractive) {
     stopCapturingEarlyInput();
@@ -915,6 +1049,12 @@ async function run(): Promise<CommanderCommand> {
     // → isRemoteManagedSettingsEligible → sync keychain reads otherwise ~65ms).
     await Promise.all([ensureMdmSettingsLoaded(), ensureKeychainPrefetchCompleted()]);
     profileCheckpoint('preAction_after_mdm');
+    // First-run migration wizard. Runs BEFORE init() so the wizard's choice
+    // (and any written ~/.kode.json) wins over init()'s recordFirstStartTime
+    // write (init.ts:132 writes ~/.kode.json on a true first run, which would
+    // defeat the existence gate). See runMigrationWizard() doc comment.
+    await runMigrationWizard();
+    profileCheckpoint('preAction_after_migration_wizard');
     await init();
     profileCheckpoint('preAction_after_init');
 
@@ -949,7 +1089,7 @@ async function run(): Promise<CommanderCommand> {
       setInlinePlugins(pluginDir);
       clearPluginCache('preAction: --plugin-dir inline plugins');
     }
-    runMigrations();
+    await runMigrations();
     profileCheckpoint('preAction_after_migrations');
 
     // Load remote managed settings for enterprise customers (non-blocking)

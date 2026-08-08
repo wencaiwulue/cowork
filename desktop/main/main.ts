@@ -38,6 +38,14 @@ import {
   type TeamShutdownInput,
   validateIpcArgs,
 } from './ipc'
+import {
+  detectMigrationSourcesViaCli,
+  performMigrationViaCli,
+  skipMigration,
+  kodeGlobalFileExists,
+  type MigrationSource,
+  type MigrationSourceInfo,
+} from './migrationWizard'
 import { DesktopSessionManager } from './sessionManager'
 import { parseDesktopDeepLink } from './deepLink'
 import { gitDiff, gitStatus } from './git'
@@ -602,9 +610,27 @@ function registerIpc(): void {
     'teams:shutdown',
     'teams:removeMember',
     'teams:delete',
+    'migration:getSources',
+    'migration:perform',
+    'migration:skip',
   ]) {
     assertDesktopChannel(channel)
   }
+  handleIpc('migration:getSources', async () => {
+    const all = await detectMigrationSourcesViaCli()
+    // First-run gate: only viable sources (exists && items > 0) AND no
+    // ~/.kode.json yet. If the global config already exists the wizard is
+    // never shown.
+    if (kodeGlobalFileExists()) return []
+    return all.filter(src => src.exists && src.totalItemCount > 0)
+  })
+  handleIpc('migration:perform', async (source: MigrationSource) => {
+    return performMigrationViaCli(source)
+  })
+  handleIpc('migration:skip', async () => {
+    await skipMigration()
+    return { ok: true } as const
+  })
 
   handleIpc('app:closeWindow', () => {
     allowMainWindowClose = true

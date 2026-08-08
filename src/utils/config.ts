@@ -576,6 +576,11 @@ export type GlobalConfig = {
   // CURRENT_MIGRATION_VERSION, runMigrations() skips all sync migrations
   // (avoiding 11× saveGlobalConfig lock+re-read on every startup).
   migrationVersion?: number
+  // Hard gate: the first-run migration wizard has been shown once. Written
+  // even when the user skips, so the gate never re-fires on subsequent launches.
+  migrationPromptSeen?: boolean
+  // Audit record of which source was imported, or none when the user skipped.
+  migratedFrom?: "claude" | "codex" | "none"
 }
 
 /**

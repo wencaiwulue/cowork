@@ -61,6 +61,9 @@ export const GlobalConfigSchema = lazySchema(() =>
       changelogLastFetched: z.number().optional(),
       cachedChangelog: z.string().optional(),
       migrationVersion: z.number().optional(),
+      // First-run migration wizard decision fields.
+      migrationPromptSeen: z.boolean().optional(),
+      migratedFrom: z.enum(["claude", "codex", "none"]).optional(),
 
       // --- OAuth / 账号 ---
       oauthAccount: looseObject().optional(),

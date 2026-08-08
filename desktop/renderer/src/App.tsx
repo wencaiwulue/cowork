@@ -95,6 +95,8 @@ import {
   shouldSyncSavedEditorModel,
 } from './editorDirty'
 import { runtimeErrorPresentation } from './runtimeErrorPresentation'
+import { MigrationWizard } from './components/MigrationWizard/MigrationWizard'
+import type { MigrationSourceInfo } from '../../main/ipc'
 
 globalThis.MonacoEnvironment = {
   getWorker() {
@@ -2080,6 +2082,19 @@ export function App() {
   >([])
   const [respondingPermissionId, setRespondingPermissionId] = useState<string>()
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest>()
+  const [migrationWizardSources, setMigrationWizardSources] = useState<MigrationSourceInfo[] | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    window.claudeDesktop.migration.getSources().then(sources => {
+      if (cancelled) return
+      if (sources.length > 0) setMigrationWizardSources(sources)
+    }).catch(() => {
+      // Migration detection is best-effort; never block startup on failure.
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   function startNewTeamDraft(): void {
     if (isLoading('session')) return
@@ -14026,6 +14041,13 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
             </div>
           </section>
         </div>
+      )}
+
+      {migrationWizardSources && (
+        <MigrationWizard
+          sources={migrationWizardSources}
+          onDone={() => setMigrationWizardSources(null)}
+        />
       )}
 
     </main>

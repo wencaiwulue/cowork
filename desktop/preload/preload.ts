@@ -40,6 +40,9 @@ import type {
   TeamShutdownInput,
   TerminalSessionInfo,
   WorkspaceEntry,
+  MigrationSource,
+  MigrationSourceInfo,
+  MigrationResult,
 } from '../main/ipc'
 
 const api = {
@@ -339,6 +342,20 @@ const api = {
       ipcRenderer.invoke('teams:removeMember', sessionId, input) as Promise<void>,
     delete: (sessionId: string, input: TeamDeleteInput) =>
       ipcRenderer.invoke('teams:delete', sessionId, input) as Promise<void>,
+  },
+  migration: {
+    getSources: () =>
+      ipcRenderer.invoke('migration:getSources') as Promise<MigrationSourceInfo[]>,
+    perform: (source: MigrationSource) =>
+      ipcRenderer.invoke('migration:perform', source) as Promise<MigrationResult>,
+    skip: () =>
+      ipcRenderer.invoke('migration:skip') as Promise<{ ok: true }>,
+    onShowWizard: (callback: (sources: MigrationSourceInfo[]) => void) => {
+      const listener = (_event: unknown, sources: MigrationSourceInfo[]) =>
+        callback(sources)
+      ipcRenderer.on('migration:showWizard', listener)
+      return () => ipcRenderer.off('migration:showWizard', listener)
+    },
   },
   onEvent(callback: (event: RuntimeEvent) => void) {
     const listener = (_event: unknown, payload: RuntimeEvent) =>
