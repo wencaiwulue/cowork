@@ -25,14 +25,25 @@ export function resolveBuildMetadata(env = process.env) {
   }
 }
 
-export function cliBuildArgs(metadata = resolveBuildMetadata()) {
+// Defaults reproduce the host-platform build the desktop packaging expects, so
+// `npm run build` and the desktop:* scripts are unaffected. Override to
+// cross-compile, e.g. CLI_BUILD_TARGET=bun-darwin-arm64.
+export function resolveBuildTarget(env = process.env) {
+  return {
+    target: env.CLI_BUILD_TARGET?.trim() || 'bun',
+    outfile: env.CLI_BUILD_OUTFILE?.trim() || './dist/claude-local',
+  }
+}
+
+export function cliBuildArgs(metadata = resolveBuildMetadata(), env = process.env) {
+  const { target, outfile } = resolveBuildTarget(env)
   return [
     'build',
     './src/entrypoints/cli.tsx',
     '--compile',
     '--outfile',
-    './dist/claude-local',
-    '--target=bun',
+    outfile,
+    `--target=${target}`,
     '--define',
     `MACRO.VERSION=${JSON.stringify(metadata.version)}`,
     '--define',
@@ -47,6 +58,8 @@ export function cliBuildArgs(metadata = resolveBuildMetadata()) {
     'MACRO.ISSUES_EXPLAINER="open an issue at https://github.com/anthropics/claude-code/issues"',
     '--define',
     'MACRO.VERSION_CHANGELOG=[]',
+    '--define',
+    'process.env.USER_TYPE="external"',
   ]
 }
 
@@ -58,6 +71,10 @@ function main() {
     console.error(error instanceof Error ? error.message : String(error))
     process.exit(1)
   }
+  // Say which platform we're producing: the outfile name alone doesn't tell you,
+  // and mistaking a Linux build for a macOS one is an easy way to lose an artifact.
+  const { target, outfile } = resolveBuildTarget()
+  console.log(`building CLI: target=${target} outfile=${outfile}`)
   const result = spawnSync('bun', cliBuildArgs(metadata), {
     cwd: root,
     stdio: 'inherit',

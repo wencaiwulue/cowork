@@ -348,3 +348,39 @@ bun run check
 - Chrome MCP、Computer Use、Tungsten、部分 ant-only/feature-gated 功能是 stub，不是完整实现。
 - 非交互 print 的实际模型调用依赖当前环境的 API base URL、网络和认证配置。
 - 该目录不是 git 仓库，因此没有提交记录或 git diff 可追踪。
+
+## 交叉编译 macOS arm64（在 Linux 容器内构建）
+
+新增 `desktop/scripts/build-cli-cross.mjs` 与 npm script `build:darwin-arm64`，用于在
+Linux 容器里产出 macOS arm64 二进制。`npm run build`（原生构建）路径未改动。
+
+在 macOS 上不需要它 —— 直接 `npm run build` 即可。以下三个坑是容器内实测得出的：
+
+### 1. 没有单个 bun 版本能独立完成整件事
+
+- **打包**需要新版 bun：只有 1.3.14+ 能解析这份快照。快照里有一批被 `feature()` 包住的
+  模块从未泄漏出来（`../buddy/observer.js`、`UltraplanChoiceDialog`、
+  `yolo-classifier-prompts/*.txt` 等），1.3.0 / 1.2.21 会直接报 `Could not resolve` 失败。
+- **交叉编译**需要旧版 bun：1.3.14 与 1.3.13 对**任何**异构 `--compile` target 都
+  SIGABRT(134)、零错误输出；1.3.0 与 1.2.21 正常。这不是下载问题 —— 从 bun 二进制里
+  挖出私有开关 `BUN_COMPILE_TARGET_TARBALL_URL`，把它指向本地 HTTP 上的
+  `@oven/bun-darwin-aarch64` 包，照样 abort。
+
+所以脚本分两步：用新 bun 打包，再用旧 bun 编译那个**已解析完毕**的 bundle。bundle 里
+不再有未解析的 import，旧 bun 就不会报错。
+
+固定版本的旧 bun 装在 `/usr/local/lib/bun-cross-1.3.0/`，通过 `/usr/local/bin/bun-cross`
+暴露；可用 `CLI_CROSS_COMPILE_BUN` 覆盖。
+
+### 2. 编译产物必须先落在本地文件系统
+
+直接把编译产物写到 virtiofs 挂载（`/data`，从 macOS 宿主共享进来）会得到一个**大小正确、
+内容全是 0 字节**的文件，而 bun 自己报告构建成功。脚本改为先编译到 `os.tmpdir()`
+（overlayfs）再 `copyFileSync` 过去，并在两处校验前 64 字节不全为 0。
+
+### 3. `bun run <script>` 在容器内不可用
+
+容器里 bun 的**运行时**无法执行 JS（`bun hi.ts` 也 SIGABRT(134)），所以 `bun run check`、
+`bun run build` 都跑不了，同理编译出来的 CLI 二进制在容器内也无法运行。改用
+`node desktop/scripts/*.mjs` 与 `npx tsc --noEmit`（后者当前**零错误**通过）。
+上文「未通过项」一节关于 `bun run check` 的记录即源于此限制。
