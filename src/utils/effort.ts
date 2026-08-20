@@ -3,13 +3,11 @@ import { isUltrathinkEnabled } from './thinking.js'
 import { getInitialSettings } from './settings/settings.js'
 import { isProSubscriber, isMaxSubscriber, isTeamSubscriber } from './auth.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
-import { getAPIProvider } from './model/providers.js'
 import {
   getAntModelOverrideConfig,
   resolveAntModel,
 } from './model/antModels.js'
 import { get3PModelCapabilityOverride } from './model/modelSupportOverrides.js'
-import { isEnvTruthy } from './envUtils.js'
 import type { EffortLevel } from 'src/entrypoints/sdk/runtimeTypes.js'
 
 export type { EffortLevel }
@@ -24,32 +22,14 @@ export const EFFORT_LEVELS = [
 export type EffortValue = EffortLevel | number
 
 // @[MODEL LAUNCH]: Add the new model to the allowlist if it supports the effort parameter.
-export function modelSupportsEffort(model: string): boolean {
-  const m = model.toLowerCase()
-  if (isEnvTruthy(process.env.CLAUDE_CODE_ALWAYS_ENABLE_EFFORT)) {
-    return true
-  }
-  const supported3P = get3PModelCapabilityOverride(model, 'effort')
-  if (supported3P !== undefined) {
-    return supported3P
-  }
-  // Supported by a subset of Claude 4 models
-  if (m.includes('opus-4-6') || m.includes('sonnet-4-6')) {
-    return true
-  }
-  // Exclude any other known legacy models (haiku, older opus/sonnet variants)
-  if (m.includes('haiku') || m.includes('sonnet') || m.includes('opus')) {
-    return false
-  }
-
-  // IMPORTANT: Do not change the default effort support without notifying
-  // the model launch DRI and research. This is a sensitive setting that can
-  // greatly affect model quality and bashing.
-
-  // Default to true for unknown model strings on 1P.
-  // Do not default to true for 3P as they have different formats for their
-  // model strings (ex. anthropics/claude-code#30795)
-  return getAPIProvider() === 'firstParty'
+/**
+ * Always true in this fork. Adaptive thinking is now unconditional (see
+ * modelSupportsAdaptiveThinking), and upstream expects `output_config.effort`
+ * to be the knob that controls it — so effort must always be sendable,
+ * regardless of whether the model string is one we recognise.
+ */
+export function modelSupportsEffort(_model: string): boolean {
+  return true
 }
 
 // @[MODEL LAUNCH]: Add the new model to the allowlist if it supports 'max' effort.

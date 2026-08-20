@@ -1,5 +1,4 @@
 import Anthropic, { type ClientOptions } from '@anthropic-ai/sdk'
-import { randomUUID } from 'crypto'
 import type { GoogleAuth } from 'google-auth-library'
 import {
   checkAndRefreshOAuthTokenIfNeeded,
@@ -12,15 +11,8 @@ import {
 } from 'src/utils/auth.js'
 import { getUserAgent } from 'src/utils/http.js'
 import { getSmallFastModel } from 'src/utils/model/model.js'
-import {
-  getAPIProvider,
-  isFirstPartyAnthropicBaseUrl,
-} from 'src/utils/model/providers.js'
 import { getProxyFetchOptions } from 'src/utils/proxy.js'
-import {
-  getIsNonInteractiveSession,
-  getSessionId,
-} from '../../bootstrap/state.js'
+import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
 import { getOauthConfig } from '../../constants/oauth.js'
 import { isDebugToStdErr, logForDebugging } from '../../utils/debug.js'
 import {
@@ -110,21 +102,14 @@ export async function getAnthropicClient({
   fetchOverride?: ClientOptions['fetch']
   source?: string
 }): Promise<Anthropic> {
-  const containerId = process.env.CLAUDE_CODE_CONTAINER_ID
-  const remoteSessionId = process.env.CLAUDE_CODE_REMOTE_SESSION_ID
-  const clientApp = process.env.CLAUDE_AGENT_SDK_CLIENT_APP
   const customHeaders = getCustomHeaders()
+  // Only a generic SDK identity plus caller-supplied headers. The CLI-specific
+  // markers (x-app, session id, client app, CCR container/session ids) are
+  // deliberately not sent — see stripClientIdentityHeaders below for the
+  // SDK-injected ones we cannot avoid setting.
   const defaultHeaders: { [key: string]: string } = {
-    'x-app': 'cli',
     'User-Agent': getUserAgent(),
-    'X-Claude-Code-Session-Id': getSessionId(),
     ...customHeaders,
-    ...(containerId ? { 'x-claude-remote-container-id': containerId } : {}),
-    ...(remoteSessionId
-      ? { 'x-claude-remote-session-id': remoteSessionId }
-      : {}),
-    // SDK consumers can identify their app/library for backend analytics
-    ...(clientApp ? { 'x-client-app': clientApp } : {}),
   }
 
   // Log API client configuration for HFI debugging
@@ -378,25 +363,69 @@ function getCustomHeaders(): Record<string, string> {
 
 export const CLIENT_REQUEST_ID_HEADER = 'x-client-request-id'
 
+/**
+ * Client identity headers that must never reach the wire. Some are set by the
+ * SDK itself (the x-stainless-* telemetry block), so stripping them here — at
+ * the single fetch choke point every provider goes through — is the only
+ * reliable place. Callers may still set them locally: x-client-request-id, for
+ * example, stays useful for correlating our own debug logs and is only dropped
+ * on the way out.
+ */
+const STRIPPED_IDENTITY_HEADERS = [
+  'x-app',
+  'x-client-app',
+  'x-claude-code-session-id',
+  'x-claude-remote-container-id',
+  'x-claude-remote-session-id',
+  CLIENT_REQUEST_ID_HEADER,
+]
+
+/**
+ * Beta flags identifying the request as coming from Claude Code. Nothing
+ * generates these any more (see utils/betas.ts), so this is a backstop for
+ * flags arriving from elsewhere — e.g. a user-supplied ANTHROPIC_BETAS.
+ */
+function isClaudeCodeBetaFlag(flag: string): boolean {
+  const lower = flag.toLowerCase()
+  return lower.includes('claude-code') || lower.includes('cli-internal')
+}
+
+// eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+function stripClientIdentityHeaders(headers: Headers): void {
+  for (const name of [...headers.keys()]) {
+    if (name.toLowerCase().startsWith('x-stainless-')) {
+      headers.delete(name)
+    }
+  }
+  for (const name of STRIPPED_IDENTITY_HEADERS) {
+    headers.delete(name)
+  }
+  // The SDK sets its own UA on some runtimes; keep it generic either way.
+  headers.set('user-agent', getUserAgent())
+
+  // Keep generic beta flags, drop the ones that identify the CLI.
+  const beta = headers.get('anthropic-beta')
+  if (beta === null) return
+  const kept = beta
+    .split(',')
+    .map(flag => flag.trim())
+    .filter(flag => flag !== '' && !isClaudeCodeBetaFlag(flag))
+  if (kept.length > 0) {
+    headers.set('anthropic-beta', kept.join(','))
+  } else {
+    headers.delete('anthropic-beta')
+  }
+}
+
 function buildFetch(
   fetchOverride: ClientOptions['fetch'],
   source: string | undefined,
 ): ClientOptions['fetch'] {
   // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
   const inner = fetchOverride ?? globalThis.fetch
-  // Only send to the first-party API — Bedrock/Vertex/Foundry don't log it
-  // and unknown headers risk rejection by strict proxies (inc-4029 class).
-  const injectClientRequestId =
-    getAPIProvider() === 'firstParty' && isFirstPartyAnthropicBaseUrl()
   return (input, init) => {
     // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
     const headers = new Headers(init?.headers)
-    // Generate a client-side request ID so timeouts (which return no server
-    // request ID) can still be correlated with server logs by the API team.
-    // Callers that want to track the ID themselves can pre-set the header.
-    if (injectClientRequestId && !headers.has(CLIENT_REQUEST_ID_HEADER)) {
-      headers.set(CLIENT_REQUEST_ID_HEADER, randomUUID())
-    }
     try {
       // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
       const url = input instanceof Request ? input.url : String(input)
@@ -407,6 +436,8 @@ function buildFetch(
     } catch {
       // never let logging crash the fetch
     }
+    // Log first (the id is only for our own logs), then scrub for the wire.
+    stripClientIdentityHeaders(headers)
     return inner(input, { ...init, headers })
   }
 }

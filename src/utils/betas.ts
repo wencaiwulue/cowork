@@ -7,12 +7,9 @@ import {
 import { getIsNonInteractiveSession, getSdkBetas } from '../bootstrap/state.js'
 import {
   BEDROCK_EXTRA_PARAMS_HEADERS,
-  CLAUDE_CODE_20250219_BETA_HEADER,
-  CLI_INTERNAL_BETA_HEADER,
   CONTEXT_1M_BETA_HEADER,
   CONTEXT_MANAGEMENT_BETA_HEADER,
   INTERLEAVED_THINKING_BETA_HEADER,
-  PROMPT_CACHING_SCOPE_BETA_HEADER,
   REDACT_THINKING_BETA_HEADER,
   STRUCTURED_OUTPUTS_BETA_HEADER,
   SUMMARIZE_CONNECTOR_TEXT_BETA_HEADER,
@@ -220,34 +217,24 @@ export function shouldIncludeFirstPartyOnlyBetas(): boolean {
 }
 
 /**
- * Global-scope prompt caching is firstParty only. Foundry is excluded because
- * GrowthBook never bucketed Foundry users into the rollout experiment — the
- * treatment data is firstParty-only.
+ * Hard-disabled in this fork. `cache_control.ephemeral.scope` is a beta-only
+ * field that generic Messages API upstreams reject outright
+ * ("cache_control.ephemeral.scope: Extra inputs are not permitted"), so we
+ * never emit it. Callers keep using this as the single gate, which also drops
+ * the prompt-caching-scope beta flag and the dynamic sysprompt boundary marker.
  */
 export function shouldUseGlobalCacheScope(): boolean {
-  return (
-    getAPIProvider() === 'firstParty' &&
-    !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS)
-  )
+  return false
 }
 
 export const getAllModelBetas = memoize((model: string): string[] => {
   const betaHeaders = []
-  const isHaiku = getCanonicalName(model).includes('haiku')
   const provider = getAPIProvider()
   const includeFirstPartyOnlyBetas = shouldIncludeFirstPartyOnlyBetas()
 
-  if (!isHaiku) {
-    betaHeaders.push(CLAUDE_CODE_20250219_BETA_HEADER)
-    if (
-      process.env.USER_TYPE === 'ant' &&
-      process.env.CLAUDE_CODE_ENTRYPOINT === 'cli'
-    ) {
-      if (CLI_INTERNAL_BETA_HEADER) {
-        betaHeaders.push(CLI_INTERNAL_BETA_HEADER)
-      }
-    }
-  }
+  // This fork never sends the claude-code / cli-internal beta flags: they
+  // identify the request as coming from the CLI. Generic feature betas below
+  // are kept as-is.
   if (isClaudeAISubscriber()) {
     betaHeaders.push(OAUTH_BETA_HEADER)
   }
@@ -351,10 +338,9 @@ export const getAllModelBetas = memoize((model: string): string[] => {
     betaHeaders.push(WEB_SEARCH_BETA_HEADER)
   }
 
-  // Always send the beta header for 1P. The header is a no-op without a scope field.
-  if (includeFirstPartyOnlyBetas) {
-    betaHeaders.push(PROMPT_CACHING_SCOPE_BETA_HEADER)
-  }
+  // Not sent: shouldUseGlobalCacheScope() is hard-disabled in this fork, so no
+  // cache_control carries a scope field and the header would be pure noise
+  // (some non-1P upstreams reject flags they don't know).
 
   // If ANTHROPIC_BETAS is set, split it by commas and add to betaHeaders.
   // This is an explicit user opt-in, so honor it regardless of model.
@@ -389,33 +375,11 @@ export const getBedrockExtraBodyParamsBetas = memoize(
  * The betas are pre-filtered by filterAllowedSdkBetas which handles
  * subscriber checks and allowlist validation with warnings.
  *
- * @param options.isAgenticQuery - When true, ensures the beta headers needed
- *   for agentic queries are present. For non-Haiku models these are already
- *   included by getAllModelBetas(); for Haiku they're excluded since
- *   non-agentic calls (compaction, classifiers, token estimation) don't need them.
+ * Agentic queries used to re-add the claude-code / cli-internal flags here;
+ * this fork never sends them, so there is nothing left to add per query.
  */
-export function getMergedBetas(
-  model: string,
-  options?: { isAgenticQuery?: boolean },
-): string[] {
+export function getMergedBetas(model: string): string[] {
   const baseBetas = [...getModelBetas(model)]
-
-  // Agentic queries always need claude-code and cli-internal beta headers.
-  // For non-Haiku models these are already in baseBetas; for Haiku they're
-  // excluded by getAllModelBetas() since non-agentic Haiku calls don't need them.
-  if (options?.isAgenticQuery) {
-    if (!baseBetas.includes(CLAUDE_CODE_20250219_BETA_HEADER)) {
-      baseBetas.push(CLAUDE_CODE_20250219_BETA_HEADER)
-    }
-    if (
-      process.env.USER_TYPE === 'ant' &&
-      process.env.CLAUDE_CODE_ENTRYPOINT === 'cli' &&
-      CLI_INTERNAL_BETA_HEADER &&
-      !baseBetas.includes(CLI_INTERNAL_BETA_HEADER)
-    ) {
-      baseBetas.push(CLI_INTERNAL_BETA_HEADER)
-    }
-  }
 
   const sdkBetas = getSdkBetas()
 

@@ -110,38 +110,16 @@ export function modelSupportsThinking(model: string): boolean {
   return canonical.includes('sonnet-4') || canonical.includes('opus-4')
 }
 
-// @[MODEL LAUNCH]: Add the new model to the allowlist if it supports adaptive thinking.
-export function modelSupportsAdaptiveThinking(model: string): boolean {
-  const supported3P = get3PModelCapabilityOverride(model, 'adaptive_thinking')
-  if (supported3P !== undefined) {
-    return supported3P
-  }
-  const canonical = getCanonicalName(model)
-  // Supported by a subset of Claude 4 models
-  if (canonical.includes('opus-4-6') || canonical.includes('sonnet-4-6')) {
-    return true
-  }
-  // Exclude any other known legacy models (allowlist above catches 4-6 variants first)
-  if (
-    canonical.includes('opus') ||
-    canonical.includes('sonnet') ||
-    canonical.includes('haiku')
-  ) {
-    return false
-  }
-  // IMPORTANT: Do not change adaptive thinking support without notifying the
-  // model launch DRI and research. This can greatly affect model quality and
-  // bashing.
-
-  // Newer models (4.6+) are all trained on adaptive thinking and MUST have it
-  // enabled for model testing. DO NOT default to false for first party, otherwise
-  // we may silently degrade model quality.
-
-  // Default to true for unknown model strings on 1P and Foundry (because Foundry
-  // is a proxy). Do not default to true for other 3P as they have different formats
-  // for their model strings.
-  const provider = getAPIProvider()
-  return provider === 'firstParty' || provider === 'foundry'
+/**
+ * Always true in this fork, so `thinking` is always sent as
+ * `{type: 'adaptive'}` and never as `{type: 'enabled', budget_tokens}`.
+ * Generic Messages API upstreams reject the latter: `"thinking.type.enabled"
+ * is not supported for this model. Use "thinking.type.adaptive" and
+ * "output_config.effort" to control thinking behavior.` The model allowlist
+ * this used to consult can't recognise relayed / renamed model strings.
+ */
+export function modelSupportsAdaptiveThinking(_model: string): boolean {
+  return true
 }
 
 export function shouldEnableThinkingByDefault(): boolean {

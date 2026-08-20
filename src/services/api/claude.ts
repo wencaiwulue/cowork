@@ -55,13 +55,11 @@ import {
   splitSysPromptPrefix,
   toolToAPISchema,
 } from '../../utils/api.js'
-import { getOauthAccountInfo } from '../../utils/auth.js'
 import {
   getBedrockExtraBodyParamsBetas,
   getMergedBetas,
   getModelBetas,
 } from '../../utils/betas.js'
-import { getOrCreateUserID } from '../../utils/config.js'
 import {
   CAPPED_DEFAULT_MAX_TOKENS,
   getModelMaxOutputTokens,
@@ -120,7 +118,6 @@ import {
   getLastApiCompletionTimestamp,
   getPromptCache1hAllowlist,
   getPromptCache1hEligible,
-  getSessionId,
   getThinkingClearLatched,
   setAfkModeHeaderLatched,
   setCacheEditingHeaderLatched,
@@ -449,6 +446,10 @@ function configureEffortParams(
   }
 
   if (effortValue === undefined) {
+    // Send an explicit level rather than relying on the API default: with
+    // adaptive thinking always on, upstream drives thinking off
+    // output_config.effort, and some relays require the field to be present.
+    outputConfig.effort = 'high'
     betas.push(EFFORT_BETA_HEADER)
   } else if (typeof effortValue === 'string') {
     // Send string effort level as is
@@ -500,31 +501,14 @@ export function configureTaskBudgetParams(
   }
 }
 
+/**
+ * No request metadata is sent. Upstream used to receive a `user_id` blob
+ * carrying device_id / account_uuid / session_id (plus anything in
+ * CLAUDE_CODE_EXTRA_METADATA, which is why that env var no longer does
+ * anything). Returning an empty object keeps every call site unchanged.
+ */
 export function getAPIMetadata() {
-  // https://docs.google.com/document/d/1dURO9ycXXQCBS0V4Vhl4poDBRgkelFc5t2BNPoEgH5Q/edit?tab=t.0#heading=h.5g7nec5b09w5
-  let extra: JsonObject = {}
-  const extraStr = process.env.CLAUDE_CODE_EXTRA_METADATA
-  if (extraStr) {
-    const parsed = safeParseJSON(extraStr, false)
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      extra = parsed as JsonObject
-    } else {
-      logForDebugging(
-        `CLAUDE_CODE_EXTRA_METADATA env var must be a JSON object, but was given ${extraStr}`,
-        { level: 'error' },
-      )
-    }
-  }
-
-  return {
-    user_id: jsonStringify({
-      ...extra,
-      device_id: getOrCreateUserID(),
-      // Only include OAuth account UUID when actively using OAuth authentication
-      account_uuid: getOauthAccountInfo()?.accountUuid ?? '',
-      session_id: getSessionId(),
-    }),
-  }
+  return {}
 }
 
 export async function verifyApiKey(
@@ -1068,7 +1052,7 @@ async function* queryModel(
     options.querySource === 'sdk' ||
     options.querySource === 'hook_agent' ||
     options.querySource === 'verification_agent'
-  const betas = getMergedBetas(options.model, { isAgenticQuery })
+  const betas = getMergedBetas(options.model)
 
   // Always send the advisor beta header when advisor is enabled, so
   // non-agentic queries (compact, side_question, extract_memories, etc.)
