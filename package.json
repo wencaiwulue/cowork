@@ -17,6 +17,7 @@
     "check": "tsc --noEmit",
     "build": "node desktop/scripts/build-cli.mjs",
     "build:darwin-arm64": "CLI_CROSS_TARGET=bun-darwin-arm64 node desktop/scripts/build-cli-cross.mjs",
+    "verify:request-shape": "node scripts/verify-request-shape.mjs",
     "desktop:check": "bun run build && bun run desktop:build-main && npx vite build --config desktop/vite.config.ts",
     "desktop:dev": "node desktop/scripts/dev.mjs",
     "desktop:test": "vitest run --config desktop/vitest.config.ts",
