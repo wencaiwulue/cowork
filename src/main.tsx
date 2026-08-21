@@ -2333,9 +2333,18 @@ async function run(): Promise<CommanderCommand> {
         errors
       } = getSettingsWithErrors();
       const nonMcpErrors = errors.filter(e => !e.mcpErrorMetadata);
-      if (nonMcpErrors.length > 0) {
+      // Settings that were merely dropped (e.g. written for a newer version) are
+      // reported on one line — the file still loaded, so there is nothing to decide.
+      const ignored = nonMcpErrors.filter(e => e.severity === 'warning');
+      const blocking = nonMcpErrors.filter(e => e.severity !== 'warning');
+      if (ignored.length > 0) {
+        const files = [...new Set(ignored.map(e => e.file).filter(Boolean))].join(', ');
+        // biome-ignore lint/suspicious/noConsole:: intentional console output
+        console.error(`Ignored ${ignored.length} unsupported ${ignored.length === 1 ? 'setting' : 'settings'}${files ? ` in ${files}` : ''}: ${ignored.map(e => e.path).join(', ')}`);
+      }
+      if (blocking.length > 0) {
         await launchInvalidSettingsDialog(root, {
-          settingsErrors: nonMcpErrors,
+          settingsErrors: blocking,
           onExit: () => gracefulShutdownSync(1)
         });
       }

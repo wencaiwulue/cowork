@@ -58,6 +58,11 @@ export type ValidationError = {
   invalidValue?: unknown
   /** Suggestion for fixing the error */
   suggestion?: string
+  /**
+   * 'warning' means the setting was dropped but the file still loaded, so it is
+   * informational rather than something to stop for. Absent means error.
+   */
+  severity?: 'error' | 'warning'
   /** Link to relevant documentation */
   docLink?: string
   /** MCP-specific metadata - only present for MCP configuration errors */
@@ -262,4 +267,89 @@ export function filterInvalidPermissionRules(
     })
   }
   return warnings
+}
+
+/** Deletes one Zod issue path from the raw data. Returns false if nothing was there. */
+function deleteAtPath(root: unknown, path: readonly PropertyKey[]): boolean {
+  let node: unknown = root
+  for (const segment of path.slice(0, -1)) {
+    if (!node || typeof node !== 'object') return false
+    node = (node as Record<PropertyKey, unknown>)[segment]
+  }
+  if (!node || typeof node !== 'object') return false
+  const last = path[path.length - 1]!
+  if (Array.isArray(node)) {
+    const index = Number(last)
+    if (!Number.isInteger(index) || index < 0 || index >= node.length) return false
+    node.splice(index, 1)
+    return true
+  }
+  const record = node as Record<PropertyKey, unknown>
+  if (!Object.hasOwn(record, last)) return false
+  delete record[last]
+  return true
+}
+
+/** Settings files are hand-edited and shared across versions; 10 rounds is plenty. */
+const MAX_STRIP_ROUNDS = 10
+
+/**
+ * Validates settings, dropping individual fields the schema rejects rather than
+ * discarding the whole file. A settings.json written for a newer Claude Code
+ * (an unknown hook event, a permission mode this build has never heard of) used
+ * to take every valid setting alongside it down; now only the offending field is
+ * ignored, reported as a warning.
+ *
+ * Mutates `data`. Root-level failures — a file whose top level is not an object —
+ * stay fatal, since "recovering" those would silently substitute an empty config.
+ */
+export function stripUnsupportedSettings(
+  data: unknown,
+  filePath: string,
+): {
+  settings: SettingsJson | null
+  warnings: ValidationError[]
+  errors: ValidationError[]
+} {
+  const warnings: ValidationError[] = []
+
+  for (let round = 0; round < MAX_STRIP_ROUNDS; round++) {
+    const result = SettingsSchema().safeParse(data)
+    if (result.success) {
+      return { settings: result.data, warnings, errors: [] }
+    }
+
+    let strippedAnything = false
+    for (const issue of result.error.issues) {
+      // Nothing to strip: the failure is the document itself, not a field in it.
+      if (issue.path.length === 0) continue
+      if (!deleteAtPath(data, issue.path)) continue
+      strippedAnything = true
+      const path = issue.path.map(String).join('.')
+      warnings.push({
+        file: filePath,
+        path,
+        message: `Unsupported setting "${path}" was ignored: ${issue.message}`,
+        severity: 'warning',
+      })
+    }
+
+    // Can't make progress, so report what's left the way we always have.
+    if (!strippedAnything) {
+      return {
+        settings: null,
+        warnings,
+        errors: formatZodError(result.error, filePath),
+      }
+    }
+  }
+
+  const lastAttempt = SettingsSchema().safeParse(data)
+  return lastAttempt.success
+    ? { settings: lastAttempt.data, warnings, errors: [] }
+    : {
+        settings: null,
+        warnings,
+        errors: formatZodError(lastAttempt.error, filePath),
+      }
 }
