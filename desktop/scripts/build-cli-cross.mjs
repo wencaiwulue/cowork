@@ -28,7 +28,7 @@
 import { copyFileSync, chmodSync, mkdtempSync, rmSync, statSync, openSync, readSync, closeSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { cliBuildArgs, resolveBuildMetadata } from './build-cli.mjs'
 
@@ -91,7 +91,9 @@ try {
   )
   assertNotZeroed(staged)
 
-  const final = join(root, outfile)
+  // resolve, not join: an absolute CLI_CROSS_OUTFILE must land where it says,
+  // not get appended to the repo root.
+  const final = resolve(root, outfile)
   copyFileSync(staged, final)
   chmodSync(final, 0o755)
   assertNotZeroed(final)
