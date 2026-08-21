@@ -47,6 +47,14 @@
 - Command palette (⌘K) for quick actions
 - Grouped settings page matching Codex layout conventions
 
+### 🧩 A2UI Declarative Surfaces
+
+- **Declarative UI from MCP or Claude**: MCP servers and Claude itself can send A2UI v0.9.1 message payloads; the desktop renders them as live React components inline in the chat transcript using the official `@a2ui/react` renderer
+- **Full 18-component basic catalog**: cards, lists, forms, tabs, modals, markdown text, images, and media players are all covered by the upstream renderer without hand-writing any component code
+- **Bidirectional interaction**: user clicks and form submissions on `RenderUI`-originated surfaces are routed back to the model as `tool_result` messages, resuming the deferred turn
+- **Default off**: the `RenderUI` built-in tool requires the `A2UI_RENDER_UI` build flag and `CLAUDE_CODE_ENTRYPOINT=claude-desktop`; it is invisible in CLI and SDK contexts
+- **Current boundaries**: MCP-originated surface interactions are not yet returned to the originating server (Phase-3 gap); remote images and media are blocked by the existing CSP; end-to-end validation in a live Electron window is pending a renderer build fix
+
 ## 🚀 Getting Started
 
 ### Prerequisites
@@ -62,7 +70,7 @@
 git clone git@github.com:wencaiwulue/synapse.git
 cd synapse
 
-# Install dependencies
+# Install dependencies (includes @a2ui/react, @a2ui/web_core, @a2ui/markdown-it)
 bun install
 
 # Start desktop in development mode (with hot reload)
@@ -80,6 +88,7 @@ bun run desktop:build
 | `bun run desktop:build` | Build main, preload, and renderer for production |
 | `bun run desktop:check` | TypeScript type check + full build |
 | `bun run desktop:test` | Run desktop test suite |
+| `bun run desktop:test-renderer` | Run jsdom-based renderer + A2UI conformance tests |
 | `bun run wcommit "msg"` | Weekend-timestamp commit and push (see below) |
 
 ## 🏗️ Architecture
@@ -118,6 +127,7 @@ synapse/
 │   ├── renderer/       # React UI
 │   │   └── src/
 │   │       ├── App.tsx
+│   │       ├── a2ui/       # A2UI renderer modules
 │   │       └── styles.css
 │   ├── preload/        # contextBridge
 │   └── scripts/        # Build/dev scripts

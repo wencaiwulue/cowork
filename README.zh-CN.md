@@ -47,6 +47,14 @@
 - 命令面板（⌘K）快速操作
 - 设置页面分组布局对齐 Codex 交互规范
 
+### 🧩 A2UI 声明式界面
+
+- **来自 MCP 或 Claude 的声明式 UI**：MCP server 或 Claude 自身可以发送 A2UI v0.9.1 消息载荷；桌面端通过官方 `@a2ui/react` 渲染器将其渲染为真实 React 组件，直接嵌入到对话流中
+- **完整 18 组件基础目录**：卡片、列表、表单、标签页、模态框、Markdown 文本、图片和媒体播放器均由上游渲染器覆盖，无需手写任何组件代码
+- **交互回流**：用户在 `RenderUI` 发起的界面上的点击和表单提交，会作为 `tool_result` 消息回传给模型，恢复被挂起的对话轮次
+- **默认关闭**：`RenderUI` 内置工具需要同时满足 `A2UI_RENDER_UI` 构建开关和 `CLAUDE_CODE_ENTRYPOINT=claude-desktop` 两个条件才会生效；在 CLI 和 SDK 上下文中该工具不可见
+- **当前边界**：MCP 来源界面的交互尚未回传到原始 MCP server（Phase-3 缺口）；远程图片和媒体因现有 CSP 被拦截；在真实 Electron 窗口中的端到端验证有待渲染器构建问题修复后完成
+
 ## 🚀 快速开始
 
 ### 环境依赖
@@ -62,7 +70,7 @@
 git clone git@github.com:wencaiwulue/synapse.git
 cd synapse
 
-# 安装依赖
+# 安装依赖（含 @a2ui/react、@a2ui/web_core、@a2ui/markdown-it）
 bun install
 
 # 开发模式启动（支持热重载）
@@ -80,6 +88,7 @@ bun run desktop:build
 | `bun run desktop:build` | 构建 main、preload、renderer 生产版本 |
 | `bun run desktop:check` | TypeScript 类型检查 + 完整构建 |
 | `bun run desktop:test` | 运行桌面端测试套件 |
+| `bun run desktop:test-renderer` | 运行基于 jsdom 的渲染器测试及 A2UI 一致性测试 |
 | `bun run wcommit "提交信息"` | 周末时间戳自动提交推送 |
 
 ## 🏗️ 系统架构
@@ -118,6 +127,7 @@ synapse/
 │   ├── renderer/       # React UI
 │   │   └── src/
 │   │       ├── App.tsx
+│   │       ├── a2ui/       # A2UI 渲染器模块
 │   │       └── styles.css
 │   ├── preload/        # contextBridge 预加载
 │   └── scripts/        # 构建/开发脚本

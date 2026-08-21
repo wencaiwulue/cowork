@@ -92,9 +92,25 @@ Synapse Desktop 是 Claude Code 的生产可用桌面客户端，对标 Codex UI
 
 ---
 
+### 2.8 A2UI 声明式界面协议
+
+| ID | 需求 | 优先级 | 状态 |
+|----|------|--------|------|
+| F-701 | MCP 工具返回 `application/a2ui+json` 资源时拦截并内联渲染，不将原始 JSON 投入模型上下文 | P0 | ✅ 完成 |
+| F-702 | 内置 `RenderUI` 工具：Claude 可通过 tool_use 声明式生成交互界面，turn 暂停等待用户交互 | P0 | ✅ 完成 |
+| F-703 | 双向 action 回传：用户点击界面组件后，action payload 通过 `sessions:submitA2uiAction` IPC 写回 CLI stdin 作为 tool_result，恢复模型 turn | P0 | ✅ 完成 |
+| F-704 | 错误上报：渲染失败时通过 `sessions:reportA2uiError` IPC 向 CLI 上报，不中断会话 | P1 | ✅ 完成 |
+| F-705 | Basic Catalog 18 组件完整支持（Card、List、Form、Tabs、Modal、MarkdownText、Image、MediaPlayer 等），使用官方 `@a2ui/react@0.10.2` / `@a2ui/web_core@0.10.6` 渲染 | P0 | ✅ 完成 |
+| F-706 | 主题桥同步：`themeBridge.ts` 将 Desktop CSS token 映射到 `--a2ui-*` 变量，并在深色/浅色切换时同步 `a2ui-dark` / `a2ui-light` class | P1 | ✅ 完成 |
+| F-707 | 43 个官方一致性 fixture 全部通过（jsdom 环境，`a2uiConformance.test.tsx`） | P0 | ✅ 完成 |
+| F-708 | 功能开关：`CLAUDE_CODE_FEATURE_A2UI` feature flag 控制 `RenderUI` 工具启用与渲染器初始化，默认关闭 | P1 | ✅ 完成 |
+
+---
+
 ## 变更记录
 
 | 日期 | 版本 | 变更内容 |
 |------|------|----------|
+| 2026-08-21 | 1.2 | 完成 A2UI 协议接入（Phase 1-2） |
 | 2026-07-26 | 1.1 | 完成 @ 提及和 / 斜杠命令功能 |
 | 2026-07-26 | 1.0 | 初始版本，完成核心功能需求文档 |

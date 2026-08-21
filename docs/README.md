@@ -23,6 +23,7 @@
 | 文档 | 说明 | 语言 |
 |------|------|------|
 | [RPC 活动追踪实现](./technical/RPC-TRACING.md) | JSON-RPC 消息捕获机制和UI实现 | 中文 |
+| [A2UI 声明式界面协议](./technical/A2UI.md) | A2UI 协议接入架构、IPC 通道、渲染器模块与测试说明 | 中文 |
 
 ---
 

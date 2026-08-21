@@ -40,6 +40,17 @@
 - [x] 本地Skill安装
 - [x] Skill详情查看/编辑
 
+### A2UI 声明式界面
+- [x] MCP 工具返回 `application/a2ui+json` 资源时拦截并内联渲染（Phase 1）
+- [x] 内置 `RenderUI` 工具（turn 暂停等待用户交互，Phase 2）
+- [x] 双向 action 回传：`sessions:submitA2uiAction` / `sessions:reportA2uiError` 两个 IPC 通道
+- [x] **Basic Catalog 18 组件**：使用官方 `@a2ui/react@0.10.2` + `@a2ui/web_core@0.10.6` + `@a2ui/markdown-it@0.1.1`
+- [x] 主题桥（`themeBridge.ts`）：Desktop CSS token → `--a2ui-*` 变量映射，深色模式自动同步 `a2ui-dark`/`a2ui-light` class
+- [x] `DesktopMessage` 扩展三个可选字段：`a2uiMessages`、`a2uiToolUseId`、`a2uiSource`
+- [x] 渲染器模块 `desktop/renderer/src/a2ui/`（4个模块：`A2uiSessionProcessor.ts`、`A2uiSurfaceHost.tsx`、`extract.ts`、`themeBridge.ts`）
+- [x] **43 个官方一致性 fixture 全部通过**（jsdom 环境，`a2uiConformance.test.tsx`）
+- [x] 功能开关：`CLAUDE_CODE_FEATURE_A2UI` feature flag，默认关闭
+
 ### Tasks (定时任务)
 - [x] 项目级定时任务
 - [x] 全局定时任务
@@ -126,6 +137,8 @@ Claude Quickstarts仓库包含以下参考实现模式：
 - [ ] 会话分支/对比视图
 - [ ] 插件市场UI
 - [ ] MCP服务器市场浏览
+- [ ] A2UI Phase 3：MCP 来源 surface 的 action 回传（需先决策合成回合中继 vs main 进程独立 MCP 客户端，见设计文档 Section 8）
+- [ ] A2UI Phase 4：放宽 CSP 或实现 main 进程媒体代理（`sessions:fetchA2uiMedia`），以支持 A2UI `Image`/`MediaPlayer` 组件加载远程资源
 
 
 ---
@@ -143,3 +156,5 @@ Claude Quickstarts仓库包含以下参考实现模式：
 - [x] quickstarts中的Agent/MCP/Browser/Computer Use模式全部由CLI SDK层提供
 - [x] 新增7个内置Agent模板（code-reviewer, test-writer, bug-finder, refactor, document-writer, browser-agent, computer-agent）
 - [x] 新增3个Prompt斜杠命令（/write-tests, /document, /plan）
+
+> **注（2026-08-21）**：以上「65个IPC channel」和「81处handleIpc」是 2026-07-24 审计时点的历史快照，在该审计完成后仍有通道陆续新增。截至 2026-08-21 实测为 **85 个 channel**、**85 处 `handleIpc`**；新增通道中有 2 个来自 A2UI 接入（`sessions:submitA2uiAction`、`sessions:reportA2uiError`），其余增长发生在本次 A2UI 接入之前。这两个数字是时点快照，不应被当作当前值读取。

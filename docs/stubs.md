@@ -110,6 +110,8 @@ Audited against [anthropics/claude-quickstarts](https://github.com/anthropics/cl
 - All 81 `handleIpc()` registrations are accounted for
 - All npm dependencies (playwright, @nut-tree-fork/nut-js, screenshot-desktop, clipboardy, @modelcontextprotocol/sdk) are installed
 
+> **Note (2026-08-21)**: The figures "65 IPC channels" and "81 `handleIpc()` registrations" above are a point-in-time snapshot accurate as of the 2026-07-24 audit. Additional channels were added after that audit. As of 2026-08-21, the measured counts are **85 channels** and **85 `handleIpc()` registrations**. Two of these channels (`sessions:submitA2uiAction`, `sessions:reportA2uiError`) come from the A2UI integration landed in branch `a2ui-integration`; the remaining growth had already occurred before A2UI and predates this note. These numbers are point-in-time snapshots and should not be read as current values.
+
 ### Quickstarts Patterns Covered
 The quickstarts demonstrate Python-side Agent class, MCP connections, and tool execution. All these patterns are handled by the underlying Claude Code CLI SDK:
 

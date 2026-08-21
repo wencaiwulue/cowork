@@ -271,6 +271,55 @@ while the renderer talks only through the typed preload IPC bridge.
   exposed by the preload bridge, including read/inspect routes for MCP and
   Skills, so newly wired renderer controls cannot bypass the public IPC
   allowlist unnoticed.
+- The desktop exposes two additional IPC channels for the A2UI declarative
+  surface protocol: `sessions:submitA2uiAction` and `sessions:reportA2uiError`.
+  Both are registered in the `desktopChannels` allowlist in
+  `desktop/main/ipc.ts` at lines 85–86 and validated by `validateIpcArgs` at
+  cases 422 and 429. `submitA2uiAction` expects a non-empty `sessionId` string
+  and a structured action payload; `reportA2uiError` expects a `sessionId` and
+  an error descriptor. Both validate arity before any main-process logic runs,
+  matching the pattern used by all other IPC channels.
+- A2UI payload extraction is performed by a pure function (`extractA2uiFromMessage`
+  in `desktop/renderer/src/a2ui/extract.ts`) that reads the three optional fields
+  (`a2uiMessages`, `a2uiToolUseId`, `a2uiSource`) attached to `DesktopMessage` by
+  the main-process `messageMapper`. The extractor never throws: all type guards and
+  array checks are wrapped in a try/catch that returns null on any failure, so a
+  malformed or missing A2UI payload degrades silently to no rendered surface without
+  disturbing the rest of the chat timeline.
+- `a2uiMessages` carries the raw A2UI v0.9.1 message array decoded from the
+  stream-json pipeline. The array is typed as `unknown[]` in `ipc.ts` deliberately:
+  main-process code must not import runtime schema types from `src/a2ui/` to avoid
+  bundling AJV validation code into the Electron main process. Schema validation
+  occurs exclusively in the renderer, inside `A2uiSessionProcessor`.
+- The `RenderUI` built-in tool is off by default. `isEnabled()` returns false
+  unless both the `A2UI_RENDER_UI` build-time feature flag is set and
+  `CLAUDE_CODE_ENTRYPOINT` equals `claude-desktop`. Any other entrypoint — CLI,
+  SDK, non-desktop channels — keeps the tool invisible, so A2UI surfaces can only
+  be produced when the desktop renderer is available to handle them.
+- When a `RenderUI` call arrives, `shouldDefer: true` suspends the CLI turn in the
+  same way as `AskUserQuestion`, keeping the turn open until the renderer calls
+  `sessions:submitA2uiAction`. The `sessionHost.submitA2uiAction()` method writes
+  the resulting `tool_result` to CLI stdin, releasing the deferred turn so the
+  model can see the user's interaction context and continue the conversation.
+- Surfaces originating from MCP servers (`a2uiSource: 'mcp'`) are rendered
+  identically to built-in surfaces, but user interactions on those surfaces are
+  not yet returned to the originating MCP server. When an action fires on an
+  MCP-originated surface, `A2uiSessionProcessor` emits a `console.warn` noting
+  the Phase-3 gap instead of silently dropping the event or attempting an
+  incomplete write.
+- The current renderer CSP (`desktop/renderer/index.html`) restricts `img-src` to
+  `'self' data:` and applies `default-src 'self'` to everything else. Remote images
+  embedded in A2UI surfaces are silently blocked by the browser; video and audio
+  elements are blocked in the same way. Surfaces that rely only on text, inline
+  SVG, or data-URI images are unaffected. A main-process media proxy to relax this
+  restriction is tracked as a future phase.
+- A2UI integration has been validated by unit tests and jsdom-based component
+  tests (`bun run desktop:test-renderer`, 84 passed), including 43 official
+  conformance fixtures and the full 18-component basic catalog. End-to-end
+  validation in a running Electron window is not yet confirmed: the existing Monaco
+  worker fault causes `npx vite build --config desktop/vite.config.ts` to fail,
+  so no packaged smoke run has exercised the A2UI render path in a live desktop
+  session.
 
 ## Workspace
 
