@@ -81,6 +81,26 @@ function extractQuestion(value: unknown): DesktopQuestion | undefined {
 
 
 
+function extractRenderUiToolUse(value: unknown): Pick<import('./ipc').DesktopMessage, 'a2uiMessages' | 'a2uiToolUseId' | 'a2uiSource'> | null {
+  if (!isRecord(value)) return null
+  const msg = value as { content?: unknown }
+  if (!Array.isArray(msg.content)) return null
+  for (const block of msg.content) {
+    if (!isRecord(block)) continue
+    if (block.type !== 'tool_use' || block.name !== 'RenderUI') continue
+    const toolUseId = typeof block.id === 'string' ? block.id : ''
+    const input = (isRecord(block.input) ? block.input : {}) as Record<string, unknown>
+    const messages = Array.isArray(input.messages) ? input.messages : null
+    if (!messages || messages.length === 0) continue
+    return {
+      a2uiMessages: messages,
+      a2uiToolUseId: toolUseId,
+      a2uiSource: 'built-in',
+    }
+  }
+  return null
+}
+
 function extractUserText(value: unknown): string {
   if (typeof value === 'string') return value
   if (!value || typeof value !== 'object') return ''
@@ -356,13 +376,15 @@ export function toDesktopMessages(raw: unknown): DesktopMessage[] {
       })
     }
     const question = extractQuestion(message.message)
-    if (text || question) {
+    const renderUiPayload = extractRenderUiToolUse(message.message)
+    if (text || question || renderUiPayload) {
       messages.push({
         id,
         role: 'assistant',
         text,
         timestamp: now,
         ...(question ? { question } : {}),
+        ...(renderUiPayload ?? {}),
         raw,
       })
     }

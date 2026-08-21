@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { existsSync } from 'node:fs'
 import { createNdjsonParser } from './ndjson'
 import { applyDesktopRuntimeEnv } from './config'
-import type { DesktopAttachment, PermissionResponse } from './ipc'
+import type { A2uiSubmitActionInput, A2uiReportErrorInput, DesktopAttachment, PermissionResponse } from './ipc'
 
 export type SessionHostChild = Pick<
   ChildProcessWithoutNullStreams,
@@ -35,6 +35,8 @@ export type SessionHost = EventEmitter & {
   readonly cwd: string
   sendMessage(text: string, attachments?: DesktopAttachment[]): void
   answerQuestion(toolUseId: string, answers: Record<string, string>, questions: Array<{question: string; options: Array<{label: string; description: string}>}>): void
+  submitA2uiAction(toolUseId: string, action: A2uiSubmitActionInput['action']): void
+  reportA2uiError(toolUseId: string, error: A2uiReportErrorInput['error']): void
   respondToPermission(requestId: string, response: PermissionResponse): void
   cancel(): void
   close(): void
@@ -297,6 +299,43 @@ export function createSessionHost(options: SessionHostOptions): SessionHost {
             type: 'tool_result',
             tool_use_id: toolUseId,
             content: toolResultContent,
+          },
+        ],
+      },
+      parent_tool_use_id: null,
+      session_id: options.sessionId,
+    })
+  }
+
+  host.submitA2uiAction = (toolUseId, action) => {
+    writeJsonLine(child, {
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: toolUseId,
+            content: JSON.stringify({ version: 'v0.9.1', action }),
+          },
+        ],
+      },
+      parent_tool_use_id: null,
+      session_id: options.sessionId,
+    })
+  }
+
+  host.reportA2uiError = (toolUseId, error) => {
+    writeJsonLine(child, {
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: toolUseId,
+            is_error: true,
+            content: JSON.stringify({ version: 'v0.9.1', error }),
           },
         ],
       },

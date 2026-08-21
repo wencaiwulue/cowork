@@ -77,6 +77,21 @@ export class A2uiSessionProcessor {
       state.processor.processMessages(extracted.a2uiMessages as Parameters<typeof state.processor.processMessages>[0])
     } catch (err) {
       console.error('[A2uiSessionProcessor] processMessages threw:', err)
+      // Route validation/render errors back through IPC when source is built-in
+      if (extracted.a2uiSource === 'built-in' && extracted.a2uiToolUseId) {
+        const errMsg = err instanceof Error ? err.message : String(err)
+        const win = window as Window & { claudeDesktop?: { sessions?: { reportA2uiError?: (sessionId: string, input: { toolUseId: string; error: { code: string; surfaceId: string; message: string } }) => Promise<void> } } }
+        if (win.claudeDesktop?.sessions?.reportA2uiError) {
+          win.claudeDesktop.sessions.reportA2uiError(sessionId, {
+            toolUseId: extracted.a2uiToolUseId,
+            error: {
+              code: 'RENDER_ERROR',
+              surfaceId: '(unknown)',
+              message: errMsg,
+            },
+          }).catch((e: unknown) => console.error('[A2UI] reportA2uiError failed:', e))
+        }
+      }
     } finally {
       state.pendingAnchor = null
     }
@@ -139,18 +154,57 @@ export class A2uiSessionProcessor {
     const existing = this.sessions.get(sessionId)
     if (existing) return existing
 
-    // Phase 1: action callback is a no-op with a clear warning so the gap
-    // is visible rather than silent (Phase 3 will wire this up properly).
     const processor = new MessageProcessor<ReactComponentImplementation>(
       [basicCatalog],
       (action) => {
         const surfaceId = (action as { surfaceId?: string }).surfaceId ?? '(unknown)'
         const name = (action as { name?: string }).name ?? '(unknown)'
-        console.warn(
-          `[A2UI Phase-1 gap] Action received on surface "${surfaceId}" (name: "${name}") ` +
-          `for session "${sessionId}" but the return channel is not yet wired. ` +
-          'This will be connected in Phase 3.',
-        )
+        // Look up the anchored surface to determine provenance
+        const anchored = surfaces.get(surfaceId)
+        if (!anchored) {
+          console.warn(
+            `[A2UI] Action received on unknown surface "${surfaceId}" (name: "${name}") ` +
+            `for session "${sessionId}". Surface may have been deleted.`,
+          )
+          return
+        }
+        if (anchored.source === 'built-in' && anchored.toolUseId) {
+          // Phase 2: route action back via IPC to the deferred RenderUI tool call
+          const payload = {
+            version: 'v0.9.1' as const,
+            action: {
+              name,
+              surfaceId,
+              sourceComponentId: (action as { sourceComponentId?: string }).sourceComponentId ?? '',
+              timestamp: new Date().toISOString(),
+              context: (action as { context?: Record<string, unknown> }).context ?? {},
+            },
+          }
+          const win = window as Window & { claudeDesktop?: { sessions?: { submitA2uiAction?: (sessionId: string, input: { toolUseId: string; action: typeof payload['action'] }) => Promise<void> } } }
+          if (win.claudeDesktop?.sessions?.submitA2uiAction) {
+            win.claudeDesktop.sessions.submitA2uiAction(sessionId, {
+              toolUseId: anchored.toolUseId,
+              action: payload.action,
+            }).catch((err: unknown) => {
+              console.error('[A2UI] submitA2uiAction failed:', err)
+            })
+          } else {
+            console.error('[A2UI] window.claudeDesktop.sessions.submitA2uiAction is unavailable')
+          }
+        } else if (anchored.source === 'mcp') {
+          // Phase 3 gap: MCP-originated surfaces cannot route actions back yet.
+          // Keep warning so the gap is visible rather than silent.
+          console.warn(
+            `[A2UI Phase-3 gap] Action received on MCP-originated surface "${surfaceId}" ` +
+            `(name: "${name}") for session "${sessionId}". ` +
+            'MCP action return is not yet implemented (Phase 3).',
+          )
+        } else {
+          console.warn(
+            `[A2UI] Action received on surface "${surfaceId}" (name: "${name}") ` +
+            `for session "${sessionId}" with unknown source "${anchored.source}".`,
+          )
+        }
       },
     )
 

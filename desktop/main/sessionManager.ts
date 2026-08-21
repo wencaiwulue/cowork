@@ -11,6 +11,8 @@ import {
   type AgentTaskToolEvent,
   type AgentTaskOutputPreviewInput,
   type AgentTaskOutputPreviewResult,
+  type A2uiSubmitActionInput,
+  type A2uiReportErrorInput,
   type PermissionResponse,
   type RuntimeEvent,
 } from './ipc'
@@ -275,6 +277,26 @@ export class DesktopSessionManager {
     const host = this.hosts.get(sessionId) ?? this.startHost(session)
     host.answerQuestion(toolUseId, answers, questions)
     this.emit({ type: 'runtime-message', sessionId: session.id, message: { type: 'question:answered', toolUseId, answers, timestamp: Date.now() } })
+  }
+
+  async submitA2uiAction(
+    sessionId: string,
+    input: A2uiSubmitActionInput,
+  ): Promise<void> {
+    const session = this.getSession(sessionId)
+    const host = this.hosts.get(sessionId)
+    if (!host) return
+    host.submitA2uiAction(input.toolUseId, input.action)
+  }
+
+  async reportA2uiError(
+    sessionId: string,
+    input: A2uiReportErrorInput,
+  ): Promise<void> {
+    const session = this.getSession(sessionId)
+    const host = this.hosts.get(sessionId)
+    if (!host) return
+    host.reportA2uiError(input.toolUseId, input.error)
   }
 
   async cancel(sessionId: string): Promise<void> {

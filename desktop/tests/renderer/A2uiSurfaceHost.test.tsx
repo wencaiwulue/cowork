@@ -232,11 +232,10 @@ describe('A2uiSurfaceHost — interactive button fixture', () => {
     processor.disposeAll()
   })
 
-  it('clicking the button invokes the action callback (Phase 1 no-op action path)', () => {
-    // In Phase 1, the action callback is a console.warn no-op but the
-    // action still fires through the @a2ui/web_core action system.
-    // We test that clicking the button does not throw and does fire
-    // the surface's action event by patching console.warn.
+  it('clicking the button on an MCP-sourced surface logs a Phase-3 gap warning', () => {
+    // In Phase 2, MCP-originated surfaces still cannot route actions back
+    // (Phase 3 gap). The action still fires through @a2ui/web_core but the
+    // callback logs a warning instead of routing via IPC.
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const processor = new A2uiSessionProcessor()
     const messages = [
@@ -259,10 +258,9 @@ describe('A2uiSurfaceHost — interactive button fixture', () => {
     const btn = screen.getByRole('button')
     expect(() => fireEvent.click(btn)).not.toThrow()
 
-    // Phase 1: action reaches the no-op logger which calls console.warn
-    // Phase 1 warn fires with a single string argument (the full message)
+    // Phase 2: MCP surfaces log the Phase-3 gap warning (not Phase-1 gap)
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('[A2UI Phase-1 gap]'),
+      expect.stringContaining('[A2UI Phase-3 gap]'),
     )
     warnSpy.mockRestore()
     processor.disposeAll()

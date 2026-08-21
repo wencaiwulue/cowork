@@ -123,6 +123,9 @@ const coordinatorModeModule = feature('COORDINATOR_MODE')
 const SnipTool = feature('HISTORY_SNIP')
   ? require('./tools/SnipTool/SnipTool.js').SnipTool
   : null
+const RenderUITool = feature('A2UI_RENDER_UI')
+  ? require('./tools/RenderUITool/RenderUITool.js').RenderUITool
+  : null
 const ListPeersTool = feature('UDS_INBOX')
   ? require('./tools/ListPeersTool/ListPeersTool.js').ListPeersTool
   : null
@@ -209,6 +212,7 @@ export function getAllBaseTools(): Tools {
     WebSearchTool,
     TaskStopTool,
     AskUserQuestionTool,
+    ...(RenderUITool ? [RenderUITool] : []),
     SkillTool,
     EnterPlanModeTool,
     ...(process.env.USER_TYPE === 'ant' ? [ConfigTool] : []),

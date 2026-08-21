@@ -36,6 +36,8 @@ import {
   type TeamMessageInput,
   type TeamRemoveMemberInput,
   type TeamShutdownInput,
+  type A2uiSubmitActionInput,
+  type A2uiReportErrorInput,
   validateIpcArgs,
 } from './ipc'
 import { DesktopSessionManager } from './sessionManager'
@@ -602,6 +604,8 @@ function registerIpc(): void {
     'teams:shutdown',
     'teams:removeMember',
     'teams:delete',
+    'sessions:submitA2uiAction',
+    'sessions:reportA2uiError',
   ]) {
     assertDesktopChannel(channel)
   }
@@ -665,6 +669,14 @@ function registerIpc(): void {
   )
   handleIpc('sessions:answerQuestion', (sessionId: string, toolUseId: string, answers: Record<string, string>, questions: Array<{question: string; options: Array<{label: string; description: string}>}>) =>
     sessionManager.answerQuestion(sessionId, toolUseId, answers, questions),
+  )
+  handleIpc('sessions:submitA2uiAction',
+    (sessionId: string, input: A2uiSubmitActionInput) =>
+      sessionManager.submitA2uiAction(sessionId, input),
+  )
+  handleIpc('sessions:reportA2uiError',
+    (sessionId: string, input: A2uiReportErrorInput) =>
+      sessionManager.reportA2uiError(sessionId, input),
   )
   handleIpc('sessions:cancel', (sessionId: string) =>
     sessionManager.cancel(sessionId),

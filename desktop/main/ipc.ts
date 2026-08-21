@@ -82,6 +82,8 @@ export const desktopChannels = [
   'teams:shutdown',
   'teams:removeMember',
   'teams:delete',
+  'sessions:submitA2uiAction',
+  'sessions:reportA2uiError',
 ] as const
 
 export type DesktopChannel = (typeof desktopChannels)[number]
@@ -417,6 +419,20 @@ export function validateIpcArgs(
         expectStringArg(channel, args, 0, 'cwd'),
         expectNonEmptyStringArg(channel, args, 1, 'agentType'),
       ]
+    case 'sessions:submitA2uiAction': {
+      expectArity(channel, args, 2)
+      return [
+        expectStringArg(channel, args, 0, 'sessionId'),
+        args[1], // A2uiSubmitActionInput — structural validation done in handler
+      ]
+    }
+    case 'sessions:reportA2uiError': {
+      expectArity(channel, args, 2)
+      return [
+        expectStringArg(channel, args, 0, 'sessionId'),
+        args[1], // A2uiReportErrorInput
+      ]
+    }
     case 'app:ready':
       return expectArity(channel, args, 0)
   }
@@ -473,6 +489,27 @@ export type DesktopQuestion = {
     options: DesktopQuestionOption[]
     multiSelect: boolean
   }>
+}
+
+export type A2uiSubmitActionInput = {
+  toolUseId: string
+  action: {
+    name: string
+    surfaceId: string
+    sourceComponentId: string
+    timestamp: string
+    context: Record<string, unknown>
+  }
+}
+
+export type A2uiReportErrorInput = {
+  toolUseId: string
+  error: {
+    code: string
+    surfaceId: string
+    message: string
+    path?: string
+  }
 }
 
 export type DesktopMessage = {

@@ -40,6 +40,8 @@ import type {
   TeamShutdownInput,
   TerminalSessionInfo,
   WorkspaceEntry,
+  type A2uiSubmitActionInput,
+  type A2uiReportErrorInput,
 } from '../main/ipc'
 
 const api = {
@@ -109,6 +111,10 @@ const api = {
       questions: Array<{question: string; options: Array<{label: string; description: string}>}>,
     ) =>
       ipcRenderer.invoke('sessions:answerQuestion', sessionId, toolUseId, answers, questions) as Promise<void>,
+    submitA2uiAction: (sessionId: string, input: A2uiSubmitActionInput) =>
+      ipcRenderer.invoke('sessions:submitA2uiAction', sessionId, input) as Promise<void>,
+    reportA2uiError: (sessionId: string, input: A2uiReportErrorInput) =>
+      ipcRenderer.invoke('sessions:reportA2uiError', sessionId, input) as Promise<void>,
     clearDesktopView: (sessionId: string) =>
       ipcRenderer.invoke('sessions:clearDesktopView', sessionId) as Promise<DesktopSession>,
     updateLayout: (sessionId: string, patch: Partial<DesktopSession['layout']>) =>
