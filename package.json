@@ -40,6 +40,9 @@
     "wcommit": "node scripts/weekend-commit.mjs"
   },
   "dependencies": {
+    "@a2ui/markdown-it": "0.1.1",
+    "@a2ui/react": "0.10.2",
+    "@a2ui/web_core": "0.10.6",
     "@alcalzone/ansi-tokenize": "latest",
     "@ant/claude-for-chrome-mcp": "file:./stubs/ant-claude-for-chrome-mcp",
     "@ant/computer-use-input": "file:./stubs/ant-computer-use-input",
