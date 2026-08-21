@@ -227,6 +227,56 @@ function streamedToolUse(raw: unknown): DesktopMessage | null {
   }
 }
 
+/**
+ * Extracts an A2UI payload from a raw stream-json user message.
+ *
+ * The raw message carries a2ui/messages in:
+ *   raw.tool_use_result._meta['a2ui/messages']  (top-level field set by normalizeMessage())
+ *
+ * The tool_use_id is captured from the first tool_result content block in
+ * raw.message.content so that Phase 2 can route actions back.
+ *
+ * Returns null on any shape mismatch — never throws.
+ */
+function extractA2uiPayload(raw: unknown): Pick<DesktopMessage, 'a2uiMessages' | 'a2uiToolUseId' | 'a2uiSource'> | null {
+  if (!isRecord(raw)) return null
+
+  // raw.tool_use_result must exist and be a record
+  const toolUseResult = raw.tool_use_result
+  if (!isRecord(toolUseResult)) return null
+
+  // _meta must exist and be a record
+  const meta = toolUseResult._meta
+  if (!isRecord(meta)) return null
+
+  // 'a2ui/messages' must be an array
+  const a2uiMessages = meta['a2ui/messages']
+  if (!Array.isArray(a2uiMessages)) return null
+
+  // Capture the tool_use_id from the first tool_result content block
+  // in the inner SDK message (raw.message.content)
+  let a2uiToolUseId: string | undefined
+  const innerMessage = raw.message
+  if (isRecord(innerMessage)) {
+    const blocks = Array.isArray(innerMessage.content) ? innerMessage.content : []
+    for (const block of blocks) {
+      if (isRecord(block) && block.type === 'tool_result') {
+        const id = block.tool_use_id
+        if (typeof id === 'string' && id.trim()) {
+          a2uiToolUseId = id.trim()
+          break
+        }
+      }
+    }
+  }
+
+  return {
+    a2uiMessages,
+    a2uiToolUseId,
+    a2uiSource: 'mcp',
+  }
+}
+
 export function toDesktopMessages(raw: unknown): DesktopMessage[] {
   if (!raw || typeof raw !== 'object' || !('type' in raw)) {
     return []
@@ -264,6 +314,19 @@ export function toDesktopMessages(raw: unknown): DesktopMessage[] {
     if ('isMeta' in message && (message as { isMeta?: unknown }).isMeta) return []
     // Skip visible-in-transcript-only messages (they're internal)
     if ('isVisibleInTranscriptOnly' in message && (message as { isVisibleInTranscriptOnly?: unknown }).isVisibleInTranscriptOnly) return []
+    // A2UI check BEFORE containsToolResult early-return: the payload is on
+    // a tool_result message that would otherwise be silently dropped.
+    const a2uiPayload = extractA2uiPayload(raw)
+    if (a2uiPayload !== null) {
+      return [{
+        id,
+        role: 'tool_output',
+        text: '',
+        timestamp: Date.now(),
+        ...a2uiPayload,
+        raw,
+      }]
+    }
     if (containsToolResult(message.message)) return []
     // Extract text from text content blocks only
     const rawText = extractUserText(message.message)

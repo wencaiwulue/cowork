@@ -484,6 +484,12 @@ export type DesktopMessage = {
   raw?: unknown
   attachments?: DesktopAttachment[]
   question?: DesktopQuestion
+  // A2UI Phase 1 fields — typed as unknown[] intentionally:
+  // desktop/main/ must not import runtime schema types from src/a2ui/
+  // to avoid bundling validation code into the main process.
+  a2uiMessages?: unknown[]         // parsed A2UI v0.9.1 message array
+  a2uiToolUseId?: string           // tool_use_id to write the action tool_result back to
+  a2uiSource?: 'mcp' | 'built-in' // provenance
 }
 
 export type AgentSource =

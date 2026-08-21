@@ -94,6 +94,8 @@ import {
   shouldApplyLoadedEditorContents,
   shouldSyncSavedEditorModel,
 } from './editorDirty'
+import { A2uiSessionProcessor } from './a2ui/A2uiSessionProcessor'
+import { A2uiSurfaceHost } from './a2ui/A2uiSurfaceHost'
 import { runtimeErrorPresentation } from './runtimeErrorPresentation'
 
 globalThis.MonacoEnvironment = {
@@ -2170,6 +2172,9 @@ export function App() {
   const [renamingSessionId, setRenamingSessionId] = useState<string>()
   const [renameValue, setRenameValue] = useState('')
   const renameInputRef = useRef<HTMLInputElement>(null)
+  const a2uiProcessorRef = useRef(new A2uiSessionProcessor())
+  const [, a2uiRenderTick] = useState(0)
+  useEffect(() => a2uiProcessorRef.current.subscribe(() => a2uiRenderTick(n => n + 1)), [])
   const activeSession = sessions.find(session => session.id === activeSessionId)
   const activePane = activeSession?.layout.activePane ?? globalPane
   const liveConversationStatus = conversationStatusText(activeSession)
@@ -3285,6 +3290,7 @@ export function App() {
           session => session.id === event.session.id,
         )
         mergeSession(event.session)
+        a2uiProcessorRef.current.replay(event.session.id, event.session.messages)
         setActiveSessionId(current => isNewSession ? event.session.id : current ?? event.session.id)
       }
       if (event.type === 'session-focused') {
@@ -11720,6 +11726,9 @@ Acknowledge the goal and begin working toward it. I will check in on your progre
                       onCancel={() => void handleAnswerQuestion(message.id, message.question!.toolUseId, {}, message.question!.questions)}
                     />
                   )}
+                  {a2uiProcessorRef.current.getSurfacesForMessage(activeSessionId!, message.id).map(anchored => (
+                    <A2uiSurfaceHost key={anchored.surface.id} anchored={anchored} />
+                  ))}
                 </article>
               )
             })}

@@ -112,6 +112,7 @@ import {
 import { buildMcpToolName } from './mcpStringUtils.js'
 import { normalizeNameForMCP } from './normalization.js'
 import { getLoggingSafeMcpBaseUrl } from './utils.js'
+import { isA2uiResource, parseA2uiMessages } from '../../a2ui/protocol.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const fetchMcpSkillsForClient = feature('MCP_SKILLS')
@@ -2539,6 +2540,28 @@ export async function transformResultContent(
       const resource = resultContent.resource
       const prefix = `[Resource from ${serverName} at ${resource.uri}] `
 
+      // A2UI guard: intercept A2UI payloads before they get flattened into
+      // model context. Return a short summary line instead of the raw JSON so
+      // prompt tokens are not wasted. If parseA2uiMessages returns null (e.g.
+      // malformed payload), fall through to the normal text flatten below.
+      if (isA2uiResource(resource) && 'text' in resource) {
+        const msgs = parseA2uiMessages(resource.text as string)
+        if (msgs !== null) {
+          const createSurfaceMsg = msgs.find(
+            (m): m is { version: 'v0.9' | 'v0.9.1'; createSurface: { surfaceId: string; catalogId: string } } =>
+              'createSurface' in m,
+          )
+          const surfaceId = createSurfaceMsg?.createSurface.surfaceId ?? 'unknown'
+          return [
+            {
+              type: 'text',
+              text: `[A2UI interface rendered: ${msgs.length} message(s), surface ${surfaceId}]`,
+            },
+          ]
+        }
+        // Fall through: malformed payload; model should still see something
+      }
+
       if ('text' in resource) {
         return [
           {
@@ -3183,9 +3206,47 @@ async function callMCPTool({
     }
 
     const content = await processMCPResult(result, tool, name)
+
+    // Scan raw result content for A2UI EmbeddedResources and, if any are found,
+    // merge their parsed messages into _meta['a2ui/messages'].
+    // The key 'a2ui/messages' (design doc §5.2) travels through the stream-json
+    // side-channel to the desktop; it never reaches the model.
+    let mergedMeta: Record<string, unknown> | undefined =
+      result._meta as Record<string, unknown> | undefined
+    if (
+      'content' in result &&
+      Array.isArray(result.content)
+    ) {
+      const a2uiMessages: unknown[] = []
+      for (const item of result.content as Array<unknown>) {
+        if (
+          item !== null &&
+          typeof item === 'object' &&
+          (item as Record<string, unknown>).type === 'resource'
+        ) {
+          const resource = (item as Record<string, unknown>).resource as
+            | Record<string, unknown>
+            | undefined
+          if (
+            resource &&
+            isA2uiResource(resource as { uri?: string; mimeType?: string }) &&
+            typeof resource.text === 'string'
+          ) {
+            const msgs = parseA2uiMessages(resource.text)
+            if (msgs !== null) {
+              a2uiMessages.push(...msgs)
+            }
+          }
+        }
+      }
+      if (a2uiMessages.length > 0) {
+        mergedMeta = { ...mergedMeta, 'a2ui/messages': a2uiMessages }
+      }
+    }
+
     return {
       content,
-      _meta: result._meta as Record<string, unknown> | undefined,
+      _meta: mergedMeta,
       structuredContent: result.structuredContent as
         | Record<string, unknown>
         | undefined,
