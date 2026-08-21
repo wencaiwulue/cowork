@@ -49,6 +49,7 @@ import {
   filterInvalidPermissionRules,
   formatZodError,
   type SettingsWithErrors,
+  stripUnsupportedSettings,
   type ValidationError,
 } from './validation.js'
 
@@ -213,17 +214,19 @@ function parseSettingsFileUncached(path: string): {
     const data = safeParseJSON(content, false)
 
     // Filter invalid permission rules before schema validation so one bad
-    // rule doesn't cause the entire settings file to be rejected.
+    // rule doesn't cause the entire settings file to be rejected. Kept ahead of
+    // the generic pass below because its messages name the rule and suggest a fix.
     const ruleWarnings = filterInvalidPermissionRules(data, path)
 
-    const result = SettingsSchema().safeParse(data)
+    // Anything else the schema rejects is dropped field by field rather than
+    // taking the file down with it — see stripUnsupportedSettings.
+    const { settings, warnings, errors } = stripUnsupportedSettings(data, path)
 
-    if (!result.success) {
-      const errors = formatZodError(result.error, path)
-      return { settings: null, errors: [...ruleWarnings, ...errors] }
+    if (!settings) {
+      return { settings: null, errors: [...ruleWarnings, ...warnings, ...errors] }
     }
 
-    return { settings: result.data, errors: ruleWarnings }
+    return { settings, errors: [...ruleWarnings, ...warnings] }
   } catch (error) {
     handleFileSystemError(error, path)
     return { settings: null, errors: [] }

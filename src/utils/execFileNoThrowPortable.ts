@@ -1,4 +1,7 @@
-import { type SyncOptions as ExecaSyncOptions, execaCommandSync } from 'execa'
+// execa dropped execaCommandSync in v9. execaSync with `shell: true` (already
+// set below) takes the whole command line as its first argument, so it is the
+// direct replacement.
+import { type SyncOptions as ExecaSyncOptions, execaSync } from 'execa'
 import { getCwd } from '../utils/cwd.js'
 import { slowLogging } from './slowOperations.js'
 
@@ -69,7 +72,7 @@ export function execSyncWithDefaults_DEPRECATED(
   abortSignal?.throwIfAborted()
   using _ = slowLogging`exec: ${command.slice(0, 200)}`
   try {
-    const result = execaCommandSync(command, {
+    const result = execaSync(command, {
       env: process.env,
       maxBuffer: 1_000_000,
       timeout: finalTimeout,
