@@ -14,11 +14,10 @@
    - **No code may be written, edited, or generated before the design document exists and is complete (no TBD sections).**
    - This rule applies to ALL agents (Developer, UI Designer, DevOps) — coordinator verifies the design doc exists before dispatching implementation agents.
 5. **Follow the full protocol.** The detailed workflow, role definitions, design-doc gate, parallelism rules, and prompt-writing guidelines are defined in the remainder of this file. Comply with all of them.
-6. **Auto-commit and push after every task.** Immediately after completing any task (and after verification passes), you MUST:
+6. **Auto-commit after every task.** Immediately after completing any task (and after verification passes), you MUST:
    - Stage ALL changed and new files (`git add -A`)
    - Create a descriptive commit message summarizing the work done
-   - Push to the current branch (`git push`)
-   - Do NOT wait for the user to ask you to commit/push. This is automatic and mandatory for every completed task, including trivial fixes. If there are no changes to commit, skip silently.
+   - Do NOT wait for the user to ask you to commit. This is automatic and mandatory for every completed task, including trivial fixes. If there are no changes to commit, skip silently.
    - The commit message should follow conventional commits style: `feat:`, `fix:`, `refactor:`, `docs:`, `style:`, `chore:`, etc.
 
 If you are reading this file (Codex via `AGENTS.md` or Claude Code via `CLAUDE.md`), this policy applies to you. No exceptions for convenience or speed. Skipping the design doc step is a policy violation.

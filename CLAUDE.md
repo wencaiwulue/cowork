@@ -30,12 +30,12 @@ Use these agent types via the `Task` tool. Definitions live in `.claude/agents/`
 
 Use the `subagent_type` parameter to select the agent when spawning a `Task`.
 
-## Auto-Commit & Push (MANDATORY)
+## Auto-Commit (MANDATORY)
 
 After completing ANY task and passing verification:
 1. `git add -A`
 2. `git commit -m "<type>: <descriptive summary>"` (use conventional commits: feat/fix/refactor/docs/style/chore)
-3. `git push`
+
 
 Do **not** wait for the user to ask. This is automatic. Skip silently if nothing changed.
 
